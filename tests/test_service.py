@@ -474,17 +474,12 @@ class TestWhatINeedArea:
 
 
 class TestTeamStrength:
-    """Strength only means something relative to someone — here, your actual league."""
+    """Coverage of the lineup you must fill — not a league comparison.
 
-    def _drafted(self, db, tmp_config, my_positions, other_positions):
-        from fantasy_draft.draft.store import create_manual_draft, record_pick
-
-        state = create_manual_draft(db, tmp_config.league, draft_id="strength")
-        keys = iter(f"00-000{i:04d}" for i in range(200))
-        for mine, positions in ((True, my_positions), (False, other_positions)):
-            for position in positions:
-                record_pick(db, state, next(keys), "P", position, "KC", mine=mine)
-        return state
+    The original version ranked you against the other teams in the draft. That collapses
+    the moment you record only your own picks, which is the normal way to use this: every
+    position reported "1 of 1" out of zero opponents and the chart meant nothing.
+    """
 
     def test_reports_a_row_per_position(self, tmp_config, db):
         from fantasy_draft.draft.store import save_state
@@ -493,24 +488,56 @@ class TestTeamStrength:
         strength = analyze_current_pick(tmp_config, db, refresh=False).team_strength()
         assert {r["position"] for r in strength["positions"]} == {"QB", "RB", "WR", "TE"}
 
-    def test_rank_is_out_of_the_number_of_teams(self, tmp_config, db):
+    def test_required_slots_come_from_the_league(self, tmp_config, db):
+        from fantasy_draft.draft.store import save_state
+
+        save_state(db, build_fixture_draft(picks_made=41, slot=7))
+        rows = {
+            r["position"]: r
+            for r in analyze_current_pick(tmp_config, db, refresh=False)
+            .team_strength()["positions"]
+        }
+        assert rows["QB"]["required"] == 1
+        assert rows["RB"]["required"] == 2      # 2 dedicated + a third of the FLEX
+        assert rows["WR"]["required"] == 2
+
+    def test_coverage_and_priority_stay_in_range(self, tmp_config, db):
         from fantasy_draft.draft.store import save_state
 
         save_state(db, build_fixture_draft(picks_made=41, slot=7))
         strength = analyze_current_pick(tmp_config, db, refresh=False).team_strength()
         for row in strength["positions"]:
-            assert 1 <= row["rank"] <= row["teams"]
-            assert 0 <= row["percentile"] <= 100
+            assert 0 <= row["coverage"] <= 100
+            assert 0 <= row["priority"] <= 100
+            assert 0 <= row["filled"] <= row["required"]
 
-    def test_priority_favours_an_empty_slot(self, tmp_config, db):
-        from fantasy_draft.draft.store import save_state
+    def test_works_with_no_opponent_picks_at_all(self, tmp_config, db):
+        """The exact failure from the screenshot: only your own picks recorded."""
+        from fantasy_draft.draft.store import create_manual_draft, record_pick
 
-        save_state(db, build_fixture_draft(picks_made=41, slot=7))
-        analysis = analyze_current_pick(tmp_config, db, refresh=False)
-        rows = {r["position"]: r for r in analysis.team_strength()["positions"]}
-        # Nothing is rostered in the fixture's own keys, so every slot is open and
-        # priority must be high everywhere rather than silently zero.
-        assert all(r["priority"] > 0 for r in rows.values())
+        state = create_manual_draft(db, tmp_config.league, draft_id="solo")
+        for i, position in enumerate(("RB", "RB")):
+            record_pick(db, state, f"00-000{i:04d}", "P", position, "KC", mine=True)
+        strength = analyze_current_pick(
+            tmp_config, db, draft_id="solo", refresh=False
+        ).team_strength()
+        assert strength["has_league_comparison"] is False
+        assert strength["opponent_teams"] == 0
+        assert all(r["league"] is None for r in strength["positions"])
+        # Still a usable readout, which is the whole point.
+        assert strength["top_priority"] in {"QB", "RB", "WR", "TE"}
+
+    def test_league_comparison_appears_once_opponents_are_recorded(self, tmp_config, db):
+        from fantasy_draft.draft.store import create_manual_draft, record_pick
+
+        state = create_manual_draft(db, tmp_config.league, draft_id="mixed")
+        record_pick(db, state, "00-0000001", "A", "RB", "KC", mine=True)
+        record_pick(db, state, "00-0000002", "B", "WR", "SF", mine=False)
+        strength = analyze_current_pick(
+            tmp_config, db, draft_id="mixed", refresh=False
+        ).team_strength()
+        assert strength["has_league_comparison"] is True
+        assert strength["opponent_teams"] >= 1
 
     def test_top_priority_is_the_highest_scoring_row(self, tmp_config, db):
         from fantasy_draft.draft.store import save_state

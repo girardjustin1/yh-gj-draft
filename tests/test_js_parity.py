@@ -361,3 +361,97 @@ class TestLineupParity:
         )
         expected = best_lineup_points(league, [(p, v) for p, v in roster])
         assert js == pytest.approx(expected, abs=1e-9)
+
+
+class TestTeamStrengthParity:
+    """Coverage is now the headline readout, so the two implementations must agree."""
+
+    def _board_and_league(self):
+        rows = [
+            {"player_key": "rb1", "position": "RB", "vbd": 124.0, "adp": 5.0, "adp_sd": 3.0,
+             "player_score": 90.0},
+            {"player_key": "rb2", "position": "RB", "vbd": 100.0, "adp": 9.0, "adp_sd": 3.0,
+             "player_score": 88.0},
+            {"player_key": "rb3", "position": "RB", "vbd": 70.0, "adp": 30.0, "adp_sd": 6.0,
+             "player_score": 80.0},
+            {"player_key": "wr1", "position": "WR", "vbd": 110.0, "adp": 6.0, "adp_sd": 3.0,
+             "player_score": 89.0},
+            {"player_key": "wr2", "position": "WR", "vbd": 89.0, "adp": 12.0, "adp_sd": 4.0,
+             "player_score": 85.0},
+            {"player_key": "qb1", "position": "QB", "vbd": 106.0, "adp": 40.0, "adp_sd": 8.0,
+             "player_score": 84.0},
+            {"player_key": "te1", "position": "TE", "vbd": 62.0, "adp": 50.0, "adp_sd": 9.0,
+             "player_score": 76.0},
+        ]
+        return rows
+
+    @pytest.mark.parametrize(
+        "mine", [[], ["rb1"], ["rb1", "rb2"], ["rb1", "wr1", "qb1"]]
+    )
+    def test_required_slots_and_coverage_match(self, league, mine):
+        """The Python side is exercised through the same arithmetic, not the service,
+        because the service needs a live draft; the numbers are what must agree."""
+        rows = self._board_and_league()
+        losses = {"RB": 2.0, "WR": 3.0, "QB": 1.0, "TE": 0.5}
+        picks = [{"k": k, "mine": True} for k in mine]
+        js = run_js(
+            "console.log(JSON.stringify(E.teamStrength(IN.L, IN.picks, 7, IN.board, IN.losses, [])))",
+            L={**JS_LEAGUE, "flex_eligibility": {"FLEX": ["RB", "WR", "TE"]}},
+            picks=picks, board=rows, losses=losses,
+        )
+        by_position = {r["position"]: r for r in js["positions"]}
+
+        # Required slots must equal Python's starter_demand per team, rounded.
+        for position in ("QB", "RB", "WR", "TE"):
+            expected = max(1, round(league.starter_demand(position) / league.teams))
+            assert by_position[position]["required"] == expected, position
+
+        # Coverage: value held over value of a full complement.
+        vbd = {r["player_key"]: r["vbd"] for r in rows}
+        position_of = {r["player_key"]: r["position"] for r in rows}
+        for position in ("QB", "RB", "WR", "TE"):
+            required = by_position[position]["required"]
+            held = sorted(
+                (vbd[k] for k in mine if position_of[k] == position), reverse=True
+            )[:required]
+            have = sum(held)
+            pool = sorted(
+                (r["vbd"] for r in rows if r["position"] == position), reverse=True
+            )
+            target = have + sum(pool[: max(0, required - len(held))])
+            coverage = (have / target * 100) if target > 0 else (100 if required == len(held) else 0)
+            assert by_position[position]["coverage"] == pytest.approx(
+                round(coverage), abs=1
+            ), position
+
+    def test_league_comparison_only_appears_with_opponent_picks(self):
+        """The bug this replaced: every position read "1 of 1" when only own picks existed."""
+        rows = self._board_and_league()
+        L = {**JS_LEAGUE, "flex_eligibility": {"FLEX": ["RB", "WR", "TE"]}}
+        only_mine = run_js(
+            "console.log(JSON.stringify(E.teamStrength(IN.L, IN.picks, 7, IN.board, {}, [])))",
+            L=L, picks=[{"k": "rb1", "mine": True}], board=rows,
+        )
+        assert only_mine["has_league_comparison"] is False
+        assert all(r["league"] is None for r in only_mine["positions"])
+
+        with_others = run_js(
+            "console.log(JSON.stringify(E.teamStrength(IN.L, IN.picks, 7, IN.board, {}, [])))",
+            L=L,
+            picks=[{"k": "rb1", "mine": True}, {"k": "wr1", "mine": False}],
+            board=rows,
+        )
+        assert with_others["has_league_comparison"] is True
+
+    def test_a_filled_position_is_the_lowest_priority(self):
+        rows = self._board_and_league()
+        js = run_js(
+            "console.log(JSON.stringify(E.teamStrength(IN.L, IN.picks, 7, IN.board, {}, [])))",
+            L={**JS_LEAGUE, "flex_eligibility": {"FLEX": ["RB", "WR", "TE"]}},
+            picks=[{"k": "rb1", "mine": True}, {"k": "rb2", "mine": True}],
+            board=rows,
+        )
+        by_position = {r["position"]: r for r in js["positions"]}
+        assert by_position["RB"]["coverage"] == 100
+        assert by_position["RB"]["priority"] < by_position["QB"]["priority"]
+        assert js["top_priority"] != "RB"

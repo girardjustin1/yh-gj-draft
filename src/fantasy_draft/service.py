@@ -204,16 +204,28 @@ class PickAnalysis:
         return out
 
     def team_strength(self) -> dict[str, Any]:
-        """How strong is my roster at each position — measured against my actual league.
+        """How well covered is each position on *my* roster, and what should I take next?
 
-        "Strong at running back" is only meaningful relative to someone. Against a
-        preseason ideal it is noise; against the eleven other teams in this draft it is
-        the thing that decides matchups, and we already hold their rosters because we
-        rebuilt them from the pick history.
+        This was originally a comparison against the other teams in the draft. That reads
+        well when every pick has been recorded, and collapses when they have not: mark
+        only your own picks and there are no other teams, so every position reports "1 of
+        1" and the bars mean nothing. Worse, it made a readout about *your* roster depend
+        on bookkeeping about everyone else's.
 
-        So strength is our summed value over replacement at a position expressed as a
-        percentile among the league's teams, and priority combines being weak there with
-        still needing the slot and the position drying up.
+        So coverage is measured against the thing that is always knowable — the lineup you
+        have to fill:
+
+            required   starting slots this position must fill (dedicated + flex share)
+            have       value of the starters you already hold there
+            target     that, plus the best players still available to fill the rest
+            coverage   have / target
+
+        A position with two elite backs and one slot left reads high; an empty tight end
+        slot reads zero. Priority then combines being uncovered with the position drying
+        up before your next pick, so it answers "what next" rather than "how am I doing".
+
+        The league comparison survives as a secondary field, reported only when opponent
+        picks actually exist.
         """
         league = self._league
         frame = self.board.frame
@@ -226,73 +238,85 @@ class PickAnalysis:
             pick.player_key: pick.position for pick in self.state.picks if pick.player_key
         }
 
+        roster = self.state.my_roster()
+        my_keys = list(roster.player_keys) if roster else []
+        losses = self.simulation.expected_position_losses if self.simulation else {}
+
+        # Best available at each position, for the "what could still fill this" side.
+        by_position: dict[str, list[float]] = {}
+        if not frame.is_empty():
+            for row in frame.select("position", "vbd").iter_rows(named=True):
+                if row["vbd"] is None:
+                    continue
+                by_position.setdefault(row["position"], []).append(float(row["vbd"]))
+        for values in by_position.values():
+            values.sort(reverse=True)
+
+        # Opponent rosters, used only for the optional league comparison.
         rosters = self.state.rosters()
         me = self.state.my_team_id
-        totals: dict[str, dict[str, float]] = {}
+        opponent_totals: dict[str, dict[str, float]] = {}
         for team_id, snapshot in rosters.items():
-            per_position: dict[str, float] = {}
+            if team_id == me or not snapshot.player_keys:
+                continue
+            per: dict[str, float] = {}
             for key in snapshot.player_keys:
                 position = position_of.get(key)
-                if not position:
-                    continue
-                per_position[position] = per_position.get(position, 0.0) + float(
-                    vbd.get(key) or 0.0
-                )
-            totals[team_id] = per_position
-
-        my_totals = totals.get(me or "", {})
-        counts = dict(self.state.my_roster().position_counts) if self.state.my_roster() else {}
-        need = self.what_i_need()
-        unfilled = set(need["unfilled"])
-        scarcity = self.board.scarcity
-        losses = (
-            self.simulation.expected_position_losses if self.simulation else {}
-        )
+                if position:
+                    per[position] = per.get(position, 0.0) + float(vbd.get(key) or 0.0)
+            opponent_totals[team_id] = per
 
         rows = []
         for position in ("QB", "RB", "WR", "TE"):
-            mine = my_totals.get(position, 0.0)
-            others = sorted(t.get(position, 0.0) for tid, t in totals.items() if tid != me)
-            below = sum(1 for value in others if value < mine)
-            percentile = (below / len(others) * 100.0) if others else 50.0
-
-            required = league.roster.dedicated.get(position, 0)
-            have = counts.get(position, 0)
-            slot_open = position in unfilled or any(
-                position in s for s in unfilled if s in {"FLEX", "SUPERFLEX"}
+            required = max(
+                1,
+                int(round(league.starter_demand(position) / max(league.teams, 1))),
             )
-            entry = scarcity.get(position)
+            mine = sorted(
+                (float(vbd.get(k) or 0.0) for k in my_keys if position_of.get(k) == position),
+                reverse=True,
+            )
+            starters = mine[:required]
+            have = sum(max(v, 0.0) for v in starters)
+
+            # Fill the remaining slots with the best still on the board.
+            gap = max(0, required - len(starters))
+            fillers = by_position.get(position, [])[:gap]
+            target = have + sum(max(v, 0.0) for v in fillers)
+            coverage = (have / target * 100.0) if target > 0 else (100.0 if gap == 0 else 0.0)
+
+            drain = min(1.0, float(losses.get(position, 0.0)) / 4.0)
+            priority = 0.70 * (100.0 - coverage) + 0.30 * (drain * 100.0)
+
+            # League comparison, only where there is something to compare against.
+            others = sorted(t.get(position, 0.0) for t in opponent_totals.values())
+            league_rank = None
+            if others:
+                below = sum(1 for value in others if value < have)
+                league_rank = {
+                    "rank": len(others) + 1 - below,
+                    "teams": len(others) + 1,
+                    "percentile": round(below / len(others) * 100.0),
+                    "median": round(others[len(others) // 2], 1),
+                }
+
             best = next(
-                (r for r in self.best_available(limit=200) if r["position"] == position),
+                (r for r in self.best_available(limit=250) if r["position"] == position),
                 None,
             )
-
-            # Priority: weak here, still short here, and it is draining.
-            drain = min(1.0, float(losses.get(position, 0.0)) / 4.0)
-            priority = (
-                0.45 * (100.0 - percentile)
-                + 0.35 * (100.0 if slot_open else 25.0)
-                + 0.20 * (drain * 100.0)
-            )
-
             rows.append(
                 {
                     "position": position,
-                    "my_value": round(mine, 1),
-                    "league_median": round(
-                        others[len(others) // 2] if others else 0.0, 1
-                    ),
-                    "percentile": round(percentile),
-                    "rank": len(others) + 1 - below,
-                    "teams": len(others) + 1,
-                    "have": have,
-                    "starters_required": required,
-                    "slot_open": slot_open,
+                    "required": required,
+                    "filled": len(starters),
+                    "have_value": round(have, 1),
+                    "target_value": round(target, 1),
+                    "coverage": round(coverage),
+                    "priority": round(min(100.0, max(0.0, priority))),
                     "expected_gone_before_next_pick": round(
                         float(losses.get(position, 0.0)), 1
                     ),
-                    "startable_available": entry.startable_available if entry else None,
-                    "priority": round(min(100.0, max(0.0, priority))),
+                    "league": league_rank,
                     "best_available": (
                         {
                             "name": best["name"], "player_key": best["player_key"],
@@ -304,8 +328,12 @@ class PickAnalysis:
             )
 
         rows.sort(key=lambda r: -r["priority"])
-        weakest = rows[0]["position"] if rows else None
-        return {"positions": rows, "top_priority": weakest}
+        return {
+            "positions": rows,
+            "top_priority": rows[0]["position"] if rows else None,
+            "has_league_comparison": bool(opponent_totals),
+            "opponent_teams": len(opponent_totals),
+        }
 
     def who_makes_it_back(self, limit: int = 10) -> list[dict[str, Any]]:
         """Area 4: survival to our next pick, which is the whole point of the app."""

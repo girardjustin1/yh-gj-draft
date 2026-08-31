@@ -298,43 +298,75 @@ const Engine = (() => {
   }
 
   /* ---- team strength: service.PickAnalysis.team_strength ----
-     Strength only means something relative to someone. Measured against the other
-     teams in this draft, whose rosters we hold, rather than an abstract ideal. */
-  function teamStrength(L, picks, mySlot, board, losses, unfilled){
+     Coverage of the lineup you have to fill, not a comparison against other teams —
+     that version reported "1 of 1" for everything as soon as you recorded only your own
+     picks, which is the normal way to use this. */
+  function requiredSlots(L, position){
+    let n = (L.dedicated||{})[position] || 0;
+    for(const [name,count] of Object.entries(L.flex_counts||{})){
+      const eligible = FLEX_ELIGIBILITY[name] || [];
+      if(eligible.includes(position)) n += count / eligible.length;
+    }
+    return Math.max(1, Math.round(n));
+  }
+
+  function teamStrength(L, picks, mySlot, board, losses, _unused){
     const vbd={}, pos={};
     for(const p of board){ vbd[p.player_key]=p.vbd??0; pos[p.player_key]=p.position; }
-    const totals={};              // teamKey -> {position: summed vbd}
+    const myKeys = picks.filter(p=>p.mine).map(p=>p.k);
+
+    // Best available at each position, to price what could still fill an empty slot.
+    const byPos={};
+    for(const p of board){
+      if(p.vbd==null) continue;
+      (byPos[p.position]=byPos[p.position]||[]).push(p.vbd);
+    }
+    for(const v of Object.values(byPos)) v.sort((a,b)=>b-a);
+
+    // Opponent rosters, for the optional league line only.
+    const opponents={};
     picks.forEach((pick,i)=>{
-      const owner = pick.mine ? "me" : `s${slotFor(i+1,L)}`;
-      const position = pos[pick.k]; if(!position) return;
-      (totals[owner]=totals[owner]||{});
-      totals[owner][position]=(totals[owner][position]||0)+(vbd[pick.k]||0);
+      if(pick.mine) return;
+      const owner=`s${slotFor(i+1,L)}`;
+      const position=pos[pick.k]; if(!position) return;
+      (opponents[owner]=opponents[owner]||{});
+      opponents[owner][position]=(opponents[owner][position]||0)+(vbd[pick.k]||0);
     });
-    const counts={};
-    for(const pick of picks) if(pick.mine){ const q=pos[pick.k]; if(q) counts[q]=(counts[q]||0)+1; }
 
     const rows=[];
     for(const position of OFFENSE){
-      const mine = (totals["me"]||{})[position]||0;
-      const others = Object.entries(totals).filter(([k])=>k!=="me")
-        .map(([,t])=>t[position]||0).sort((a,b)=>a-b);
-      const below = others.filter(v=>v<mine).length;
-      const percentile = others.length ? below/others.length*100 : 50;
-      const open = unfilled.includes(position) || unfilled.includes("FLEX");
+      const required = requiredSlots(L, position);
+      const mine = myKeys.filter(k=>pos[k]===position)
+        .map(k=>vbd[k]||0).sort((a,b)=>b-a);
+      const starters = mine.slice(0, required);
+      const have = starters.reduce((s,v)=>s+Math.max(v,0),0);
+      const gap = Math.max(0, required-starters.length);
+      const fillers = (byPos[position]||[]).slice(0, gap);
+      const target = have + fillers.reduce((s,v)=>s+Math.max(v,0),0);
+      const coverage = target>0 ? have/target*100 : (gap===0?100:0);
       const drain = Math.min(1,(losses[position]||0)/4);
-      rows.push({position, my_value:mine,
-        league_median: others.length?others[Math.floor(others.length/2)]:0,
-        percentile:Math.round(percentile), rank:others.length+1-below,
-        teams:others.length+1, have:counts[position]||0, slot_open:open,
-        expected_gone_before_next_pick:+(losses[position]||0).toFixed(1),
-        priority: Math.round(Math.min(100,Math.max(0,
-          0.45*(100-percentile)+0.35*(open?100:25)+0.20*drain*100)))});
+      const priority = 0.70*(100-coverage) + 0.30*drain*100;
+
+      const others = Object.values(opponents).map(t=>t[position]||0).sort((a,b)=>a-b);
+      let league=null;
+      if(others.length){
+        const below = others.filter(v=>v<have).length;
+        league = {rank: others.length+1-below, teams: others.length+1,
+          percentile: Math.round(below/others.length*100),
+          median: others[Math.floor(others.length/2)]};
+      }
+      rows.push({position, required, filled:starters.length,
+        have_value:+have.toFixed(1), target_value:+target.toFixed(1),
+        coverage:Math.round(coverage), priority:Math.round(Math.min(100,Math.max(0,priority))),
+        expected_gone_before_next_pick:+(losses[position]||0).toFixed(1), league});
     }
     rows.sort((a,b)=>b.priority-a.priority);
-    return {positions:rows, top_priority:rows.length?rows[0].position:null};
+    return {positions:rows, top_priority:rows.length?rows[0].position:null,
+      has_league_comparison:Object.keys(opponents).length>0,
+      opponent_teams:Object.keys(opponents).length};
   }
 
-  return {OFFENSE, FLEX_ELIGIBILITY, teamStrength, forward, roundFor, slotFor, pickNumber, label,
+  return {OFFENSE, FLEX_ELIGIBILITY, teamStrength, requiredSlots, forward, roundFor, slotFor, pickNumber, label,
     picksForSlot, slotsBetween, adpSurvival, normCdf, unfilledStarters, marketPrior,
     positionProbabilities, opponentNeeds, survivalProbabilities, simulate, bestLineup};
 })();

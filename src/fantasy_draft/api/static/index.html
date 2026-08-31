@@ -236,12 +236,17 @@ select{background:var(--panel-2);color:var(--text);border:1px solid var(--line);
   background:transparent;color:var(--dim);font-size:11px;font-weight:700}
 
 /* ---------- team strength ---------- */
-.strow{display:grid;grid-template-columns:34px 1fr 74px;gap:9px;align-items:center;
-  margin-bottom:8px}
+.strow{display:grid;grid-template-columns:34px 1fr 78px;gap:9px;align-items:start;
+  margin-bottom:11px}
+.strow .vorlabel{margin-top:1px}
+.stsub{display:flex;align-items:center;gap:5px;margin-top:5px;font-size:10.5px;color:var(--dim)}
+.pip{width:7px;height:7px;border-radius:2px;background:#2c343f;display:inline-block;flex:none}
+.pip.on{background:var(--good)}
 .sttrack{height:20px;border-radius:7px;background:var(--panel-2);overflow:hidden;position:relative}
 .sttrack>span{display:block;height:100%;border-radius:7px;transition:width .35s ease}
 .sttrack .med{position:absolute;top:0;bottom:0;width:2px;background:var(--dimmer);opacity:.9}
-.stmeta{font-family:var(--mono);font-size:11px;color:var(--dim);text-align:right;line-height:1.3}
+.stmeta{font-family:var(--mono);font-size:11px;color:var(--dim);text-align:right;line-height:1.35}
+.stmeta b{font-size:16px}
 .stmeta b{font-family:var(--sans);font-size:11px}
 .prio{display:inline-block;padding:1px 6px;border-radius:5px;font-size:10px;font-weight:800}
 
@@ -942,30 +947,45 @@ function renderVor(d){
 function renderStrength(d){
   const ts=d.team_strength;
   if(!ts||!ts.positions.length){ $("strengthBody").innerHTML=`<div class="empty">—</div>`; return; }
-  const maxV=Math.max(1,...ts.positions.map(p=>Math.max(p.my_value,p.league_median)));
+
+  const rows=ts.positions.map(p=>{
+    const cov=Math.max(0,Math.min(100,p.coverage));
+    /* The bar is what you still NEED: full means the slot is wide open. */
+    const need=100-cov;
+    const col = p.priority>=65?"var(--bad)":(p.priority>=40?"var(--warn)":"var(--good)");
+    const pips=Array.from({length:p.required},(_,i)=>
+      `<i class="pip ${i<p.filled?"on":""}"></i>`).join("");
+    return `<div class="strow">
+      <div class="vorlabel ${posClass(p.position)}">${p.position}</div>
+      <div>
+        <div class="sttrack"><span style="width:${Math.max(2,Math.round(need))}%;background:${col}"></span></div>
+        <div class="stsub">${pips}
+          <span>${p.filled} of ${p.required} starter${p.required===1?"":"s"}</span>
+          ${p.expected_gone_before_next_pick>0.4
+            ? `<span class="muted">· ${fmt(p.expected_gone_before_next_pick,1)} go before your pick</span>`:""}
+        </div>
+      </div>
+      <div class="stmeta"><b style="color:${col}">${p.priority}</b><br>${cov}% set</div>
+    </div>`;}).join("");
+
+  const league = ts.has_league_comparison
+    ? `<div class="muted" style="margin-top:10px">Against the ${ts.opponent_teams} opposing
+        teams whose picks you have recorded: `
+      + ts.positions.filter(p=>p.league).map(p=>
+          `${p.position} ${p.league.rank}/${p.league.teams}`).join(" · ") + `</div>`
+    : `<div class="muted" style="margin-top:10px">Swipe other managers' picks off the board
+        and this will also rank you against your league.</div>`;
+
   $("strengthBody").innerHTML=
-    `<div class="muted" style="margin-bottom:10px">Your value at each position against the
-      other ${ts.positions[0].teams-1} teams in this draft. The grey line is the league median.</div>`
-    + ts.positions.map(p=>{
-      const w=Math.max(2,Math.round(100*p.my_value/maxV));
-      const med=Math.max(0,Math.min(100,Math.round(100*p.league_median/maxV)));
-      const col = p.percentile>=66?"var(--good)":(p.percentile>=33?"var(--warn)":"var(--bad)");
-      const prioCol = p.priority>=70?"var(--bad)":(p.priority>=45?"var(--warn)":"var(--dimmer)");
-      return `<div class="strow">
-        <div class="vorlabel ${posClass(p.position)}">${p.position}</div>
-        <div class="sttrack"><span style="width:${w}%;background:${col}"></span>
-          <i class="med" style="left:${med}%"></i></div>
-        <div class="stmeta"><b style="color:${col}">${p.rank} of ${p.teams}</b><br>
-          ${p.have} rostered</div>
-      </div>`;}).join("")
-    + `<div class="muted" style="margin-top:10px">Draft next, by priority: `
-    + ts.positions.map(p=>{
-        const c = p.priority>=70?"var(--bad)":(p.priority>=45?"var(--warn)":"var(--dimmer)");
-        return `<span class="prio" style="background:${c};color:#06121f">${p.position} ${p.priority}</span>`;
-      }).join(" ")
-    + `</div><div class="muted" style="margin-top:6px">Priority combines being weak there,
-       still needing the slot, and the position drying up before your next pick. It is a
-       readout — the recommendation above is still value-driven.</div>`;
+    `<div class="muted" style="margin-bottom:11px">How much of each starting slot you still
+      need to fill. A longer bar is a bigger hole — <b>${esc(ts.top_priority??"")}</b> is the
+      most pressing.</div>`
+    + rows
+    + `<div class="muted" style="margin-top:10px">The number is priority: how empty the slot
+       is, plus how fast the position is drying up before your next pick. A readout — the
+       recommendation above stays value-driven, because reaching for a hole is how drafts
+       go wrong.</div>`
+    + league;
 }
 
 /* ---------- what you still need ---------- */
