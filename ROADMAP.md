@@ -183,14 +183,33 @@ options, and explains the trade in the spec's own terms.
 
 ---
 
-## ⬜ Phase 5 — Simulation
+## ✅ Phase 5 — Simulation
 
-- Monte Carlo draft simulation to our next pick, seeded and reproducible
-- `probability_available_next_pick`, two-pick expected value, strategy adaptation
-- Simulation caching keyed on draft state; `ff simulate`
+**Built**
+- `draft/simulator.py` — vectorized NumPy Monte Carlo of the picks between our turn and
+  our next, seeded and reproducible; two-pick expected value with an 80% interval and
+  the likely position of our next selection; `blend_survival`
+- `ff simulate`, and `ff on-clock --simulate/--no-simulate --iterations`
 
-**Acceptance** — every top candidate carries a survival probability and a two-pick EV,
-returned fast enough for a 30–90 second clock.
+**Acceptance** ✅ — **0.17s for the full recommendation with 2,000 simulations**, 0.43s
+at 10,000, against a 30-90 second clock. Two-pick EV is stable across iteration counts
+(180.57 at 2k vs 180.61 at 10k), so 2,000 is enough.
+
+**The simulation cross-validates the analytic model.** Built from the same inputs but
+making different approximations, they agree within 1-5 points across the top candidates,
+and the analytic model is consistently the *optimistic* one — exactly the direction its
+independence assumption predicts, since it cannot see that the managers ahead of us
+compete for the same players. Both figures are reported side by side in `ff simulate`;
+where they diverge sharply, that is worth knowing.
+
+**One approximation, stated rather than hidden.** The intervening picks are simulated
+once over the full pool, and each candidate's next-pick value is computed by excluding
+him from those same survivors. Simulating separately per candidate would multiply the
+cost by the candidate count for a second-order correction — removing one player from a
+pool of hundreds barely moves the other managers. The note is printed with the output.
+
+Two-pick EV overrides the Draft Now ranking only on a margin larger than simulation
+noise (1.5 points), and says so in the explanation when it does.
 
 ---
 

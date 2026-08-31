@@ -1116,6 +1116,12 @@ def on_clock(
     draft_id: Annotated[str | None, typer.Option("--draft-id")] = None,
     limit: Annotated[int, typer.Option("--limit", "-n", help="Candidates to show.")] = 6,
     sync: Annotated[bool, typer.Option("--sync/--no-sync", help="Refresh from Sleeper first.")] = False,
+    simulate: Annotated[
+        bool, typer.Option("--simulate/--no-simulate", help="Run the Monte Carlo two-pick model.")
+    ] = True,
+    iterations: Annotated[
+        int | None, typer.Option("--iterations", help="Simulation runs. Default from config.")
+    ] = None,
     json_out: Annotated[bool, typer.Option("--json", help="Emit compact JSON instead.")] = False,
 ) -> None:
     """The recommendation: who should I draft right now?"""
@@ -1154,7 +1160,10 @@ def on_clock(
             raise typer.Exit(code=1)
 
         with console.status("[cyan]Thinking...", spinner="dots"):
-            result = recommend(db, cfg, state, limit=max(limit, 6))
+            result = recommend(
+                db, cfg, state, limit=max(limit, 6),
+                simulate=simulate, iterations=iterations,
+            )
 
     rec = result.recommendation
     if json_out:
@@ -1171,6 +1180,16 @@ def on_clock(
                     "strategy_confidence": round(rec.strategy_confidence, 3),
                     "confidence": round(rec.confidence, 3),
                     "position_demand": rec.position_demand,
+                    "simulation": (
+                        {
+                            "iterations": result.simulation.iterations,
+                            "picks_simulated": result.simulation.picks_simulated,
+                            "seed": result.simulation.seed,
+                            "approximation": result.simulation.approximation_note,
+                        }
+                        if result.simulation
+                        else None
+                    ),
                     "recommendation": rec.primary.summary() if rec.primary else None,
                     "alternatives": [c.summary() for c in rec.alternatives],
                     "board": [c.summary() for c in rec.board],
@@ -1257,6 +1276,8 @@ def on_clock(
     table.add_column("Value", justify="right", no_wrap=True)
     table.add_column("ADP", justify="right", no_wrap=True)
     table.add_column("Gone by next", justify="right", no_wrap=True)
+    if any(c.two_pick_expected_value is not None for c in rec.board[:limit]):
+        table.add_column("2-pick EV", justify="right", no_wrap=True)
     for i, candidate in enumerate(rec.board[:limit], start=1):
         gone = candidate.survival.probability_gone if candidate.survival else None
         gone_text = "[dim]?[/dim]" if gone is None else (
@@ -1264,7 +1285,7 @@ def on_clock(
             else (f"[yellow]{gone * 100:.0f}%[/yellow]" if gone >= 0.4
                   else f"[green]{gone * 100:.0f}%[/green]")
         )
-        table.add_row(
+        row = [
             str(i),
             f"[bold]{candidate.name}[/bold]" if i == 1 else candidate.name,
             candidate.position,
@@ -1274,8 +1295,20 @@ def on_clock(
             f"{candidate.value_score.value:.1f}" if candidate.value_score else "",
             _num(candidate.adp, 1),
             gone_text,
-        )
+        ]
+        if len(table.columns) == 10:
+            row.append(
+                f"{candidate.two_pick_expected_value:.1f}"
+                if candidate.two_pick_expected_value is not None else "[dim]-[/dim]"
+            )
+        table.add_row(*row)
     console.print(table)
+    if result.simulation and result.simulation.iterations:
+        console.print(
+            f"[dim]2-pick EV = this player's value plus the simulated best available at "
+            f"our next pick, over {result.simulation.iterations:,} runs "
+            f"(seed {result.simulation.seed}).[/dim]"
+        )
 
     # --- the recommendation ---
     if rec.primary:
@@ -1296,6 +1329,118 @@ def on_clock(
 
     for warning in rec.warnings:
         console.print(f"[yellow]note:[/yellow] [dim]{warning}[/dim]")
+
+
+@app.command("simulate")
+def simulate_cmd(
+    ctx: typer.Context,
+    draft_id: Annotated[str | None, typer.Option("--draft-id")] = None,
+    iterations: Annotated[
+        int | None, typer.Option("--iterations", "-i", help="Simulation runs.")
+    ] = None,
+    limit: Annotated[int, typer.Option("--limit", "-n", help="Candidates to price.")] = 8,
+) -> None:
+    """Simulate the picks until our next turn, and price each candidate over both picks."""
+    from .analytics.board import build_board
+    from .draft.availability import survival_probabilities
+    from .draft.opponent_needs import opponent_needs
+    from .draft.simulator import simulate_to_next_pick
+    from .draft.store import load_state
+
+    cfg = get_config(ctx)
+    with connect(cfg.paths.db_path) as db:
+        state = load_state(db, draft_id)
+        if state is None:
+            err_console.print("No draft available. Run [bold]ff draft mock[/bold] to practise.")
+            raise typer.Exit(code=1)
+        if state.my_slot is None or state.my_next_pick is None:
+            err_console.print(
+                "[yellow]No next pick to simulate toward[/yellow] — either the draft slot "
+                "is unset, or this is our final selection."
+            )
+            raise typer.Exit(code=1)
+
+        board = build_board(
+            db, cfg, drafted=state.drafted_keys,
+            current_pick=state.my_current_pick, picks_until_next=state.picks_until_next,
+            next_pick=state.my_next_pick,
+        )
+        needs = opponent_needs(state, cfg.league, board.frame)
+        analytic = survival_probabilities(state, cfg.league, board.frame, needs)
+        shortlist = board.frame.head(limit)["player_key"].to_list()
+        with console.status("[cyan]Simulating...", spinner="dots"):
+            sim = simulate_to_next_pick(
+                cfg, state, board.frame, needs, candidates=shortlist, iterations=iterations
+            )
+
+    names = dict(zip(board.frame["player_key"], board.frame["player_name"], strict=True))
+
+    console.print(
+        Panel(
+            f"{sim.iterations:,} simulations of the {sim.picks_simulated} picks between "
+            f"{state.board.label(state.my_current_pick)} and "
+            f"{state.board.label(state.my_next_pick)}  [dim](seed {sim.seed})[/dim]",
+            border_style="cyan",
+        )
+    )
+
+    table = Table(
+        title="Survival to our next pick", header_style="bold", title_justify="left"
+    )
+    table.add_column("Player", no_wrap=True)
+    table.add_column("Pos", justify="center")
+    table.add_column("Analytic", justify="right")
+    table.add_column("Simulated", justify="right")
+    table.add_column("Δ", justify="right", style="dim")
+    frame_positions = dict(zip(board.frame["player_key"], board.frame["position"], strict=True))
+    for key in shortlist:
+        a = analytic.estimates.get(key)
+        analytic_value = a.probability_available if a else None
+        simulated = sim.survival.get(key)
+        delta = (
+            f"{(simulated - analytic_value) * 100:+.1f}"
+            if analytic_value is not None and simulated is not None else ""
+        )
+        table.add_row(
+            names.get(key, key), frame_positions.get(key, ""),
+            f"{analytic_value * 100:.1f}%" if analytic_value is not None else "-",
+            f"{simulated * 100:.1f}%" if simulated is not None else "-",
+            delta,
+        )
+    console.print(table)
+    console.print(
+        "[dim]The analytic model treats the intervening picks as independent; the\n"
+        "simulation captures their correlation, so it usually reads slightly lower.\n"
+        "Where the two agree, the estimate is well supported.[/dim]\n"
+    )
+
+    if sim.two_pick:
+        ev = Table(title="Two-pick expected value", header_style="bold", title_justify="left")
+        ev.add_column("Player", no_wrap=True)
+        ev.add_column("Value now", justify="right")
+        ev.add_column("Expected next", justify="right")
+        ev.add_column("Combined", justify="right")
+        ev.add_column("80% range at next pick", justify="right", style="dim")
+        ev.add_column("Likely next", justify="center")
+        for value in sorted(sim.two_pick.values(), key=lambda v: -v.combined):
+            ev.add_row(
+                names.get(value.player_key, value.player_key),
+                f"{value.value_now:.1f}",
+                f"{value.expected_next_value:.1f}",
+                f"[bold]{value.combined:.1f}[/bold]",
+                f"{value.next_value_low:.0f}-{value.next_value_high:.0f}",
+                value.likely_next_position or "",
+            )
+        console.print(ev)
+
+    losses = Table(title="Expected to go before our next pick", header_style="bold",
+                   title_justify="left")
+    losses.add_column("Pos", style="cyan")
+    losses.add_column("Players", justify="right")
+    for position, count in sorted(sim.expected_position_losses.items(), key=lambda kv: -kv[1]):
+        losses.add_row(position, f"{count:.1f}")
+    console.print(losses)
+    console.print(f"[dim]{sim.approximation_note}[/dim]")
 
 
 # --- players -------------------------------------------------------------------------

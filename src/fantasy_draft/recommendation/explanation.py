@@ -93,6 +93,8 @@ def write_explanation(
     state: DraftState,
     room: DraftRoomRead,
     strategy: StrategyState,
+    simulation: object | None = None,
+    two_pick_override: str | None = None,
 ) -> str:
     """Compose the full narrative for the recommendation."""
     primary = recommendation.primary
@@ -142,11 +144,25 @@ def write_explanation(
     if recommendation.alternatives:
         parts.append(compare_two(primary, recommendation.alternatives[0]))
 
-    # 5. What the room is doing.
+    # 5. The pair of picks, which is the decision that actually matters.
+    if two_pick_override:
+        parts.append(two_pick_override)
+    elif primary.two_pick_expected_value is not None:
+        paths = [
+            f"{c.name} {c.two_pick_expected_value:.1f}"
+            for c in [primary, *recommendation.alternatives]
+            if c.two_pick_expected_value is not None
+        ]
+        if len(paths) > 1:
+            parts.append(
+                "Across both picks, simulated expected value: " + "; ".join(paths) + "."
+            )
+
+    # 6. What the room is doing.
     if room.notes:
         parts.extend(room.notes)
 
-    # 6. Roster construction.
+    # 7. Roster construction.
     roster = state.my_roster()
     if roster and roster.size:
         shape = ", ".join(f"{n} {p}" for p, n in sorted(roster.position_counts.items()))
@@ -155,7 +171,7 @@ def write_explanation(
             f"{strategy.label} ({strategy.reason})."
         )
 
-    # 7. Honest caveats.
+    # 8. Honest caveats.
     stale = [row.source for row in recommendation.staleness if row.is_stale]
     if stale:
         parts.append(

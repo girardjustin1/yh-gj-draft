@@ -32,6 +32,7 @@ from ..constants import OFFENSE_POSITIONS
 from ..database import Database
 from ..draft.availability import SurvivalResult, attach_survival, survival_probabilities
 from ..draft.opponent_needs import opponent_needs
+from ..draft.simulator import SimulationResult, blend_survival, simulate_to_next_pick
 from ..draft.state import DraftState
 from ..draft.strategies import StrategyState, classify
 from ..logging import get_logger
@@ -58,6 +59,7 @@ class RecommendationResult:
         strategy: StrategyState,
         survival: SurvivalResult,
         frame: pl.DataFrame,
+        simulation: SimulationResult | None = None,
     ) -> None:
         self.recommendation = recommendation
         self.board = board
@@ -65,6 +67,7 @@ class RecommendationResult:
         self.strategy = strategy
         self.survival = survival
         self.frame = frame
+        self.simulation = simulation
 
 
 def _freshness(db: Database, cfg: AppConfig, state: DraftState) -> list[DataFreshness]:
@@ -133,12 +136,20 @@ def _candidate(cfg: AppConfig, row: dict) -> Candidate:
     )
 
 
+#: Two-pick EV must beat the Draft Now leader by at least this much to override it.
+#: Simulation noise at a few thousand iterations is worth roughly a point, so a smaller
+#: margin is not evidence of anything.
+TWO_PICK_OVERRIDE_MARGIN = 1.5
+
+
 def recommend(
     db: Database,
     cfg: AppConfig,
     state: DraftState,
     limit: int = 10,
     positions: tuple[str, ...] = OFFENSE_POSITIONS,
+    simulate: bool = True,
+    iterations: int | None = None,
 ) -> RecommendationResult:
     """Produce a ranked, explained recommendation for the pick on the clock."""
     warnings: list[str] = []
@@ -157,7 +168,7 @@ def recommend(
                 pick_label=state.pick_label, overall_pick=target_pick,
                 confidence=0.0, warnings=warnings or ["No players available to score."],
             ),
-            board, DraftRoomRead(), StrategyState(), 
+            board, DraftRoomRead(), StrategyState(),
             SurvivalResult({}, {}, 0, "none"), frame,
         )
 
@@ -204,9 +215,80 @@ def recommend(
     frame = add_tier_scarcity(frame, survival.expected_position_losses)
     frame = add_draft_now_score(cfg, frame)
 
+    # 7. Simulate forward: cross-check survival, and price the *pair* of picks.
+    simulation: SimulationResult | None = None
+    if simulate and needs and not frame.is_empty():
+        shortlist = frame.head(cfg.weights.simulation.two_pick_candidates)[
+            "player_key"
+        ].to_list()
+        try:
+            simulation = simulate_to_next_pick(
+                cfg, state, frame, needs, candidates=shortlist, iterations=iterations
+            )
+        except Exception as exc:  # noqa: BLE001 — a failed simulation must not cost the pick
+            log.warning("simulation failed", extra={"error": str(exc)})
+            warnings.append(f"Simulation unavailable ({type(exc).__name__}); using the "
+                            "analytic survival model alone.")
+
+        if simulation is not None and simulation.survival:
+            # The analytic model treats the intervening picks as independent; the
+            # simulation captures their correlation. Averaging is more honest than
+            # picking a favourite, and the gap between them is worth reporting.
+            blended = blend_survival(
+                {k: v.probability_available for k, v in survival.estimates.items()},
+                simulation.survival,
+            )
+            frame = frame.with_columns(
+                pl.col("player_key")
+                .replace_strict(blended, default=None)
+                .cast(pl.Float64)
+                .alias("simulated_available")
+            ).with_columns(
+                pl.coalesce("simulated_available", "probability_available")
+                .alias("probability_available")
+            ).with_columns(
+                (1.0 - pl.col("probability_available")).alias("probability_gone"),
+                (100.0 * (1.0 - pl.col("probability_available")))
+                .clip(0, 100)
+                .alias("next_pick_urgency_score"),
+                pl.lit(0.85).alias("survival_confidence"),
+            )
+            frame = add_draft_now_score(cfg, frame)
+
     top = frame.head(max(limit, CANDIDATE_DEPTH)).to_dicts()
     candidates = [_candidate(cfg, row) for row in top[:limit]]
+
+    if simulation is not None:
+        for candidate in candidates:
+            value = simulation.two_pick.get(candidate.player_key)
+            if value is not None:
+                candidate.two_pick_expected_value = round(value.combined, 2)
+                candidate.expected_next_pick_value = round(value.expected_next_value, 2)
+
     primary = candidates[0] if candidates else None
+
+    # Two-pick expected value may overturn the ranking — that is its purpose. It only
+    # does so on a margin larger than simulation noise, and the override is stated in
+    # the explanation rather than applied silently.
+    two_pick_override: str | None = None
+    if primary is not None and primary.two_pick_expected_value is not None:
+        better = max(
+            (c for c in candidates if c.two_pick_expected_value is not None),
+            key=lambda c: c.two_pick_expected_value,
+        )
+        margin = better.two_pick_expected_value - primary.two_pick_expected_value
+        if better.player_key != primary.player_key and margin >= TWO_PICK_OVERRIDE_MARGIN:
+            two_pick_override = (
+                f"Draft Now rated {primary.name} highest on this pick alone, but across "
+                f"both picks {better.name} is worth "
+                f"{better.two_pick_expected_value:.1f} against "
+                f"{primary.two_pick_expected_value:.1f} — a {margin:.1f}-point edge on "
+                f"the pair, so he is the recommendation."
+            )
+            candidates.remove(better)
+            candidates.insert(0, better)
+            primary = better
+
     alternatives = candidates[1:3]
 
     staleness = _freshness(db, cfg, state)
@@ -230,9 +312,13 @@ def recommend(
         warnings=warnings,
         staleness=staleness,
     )
-    recommendation.explanation = write_explanation(recommendation, state, room, strategy)
+    recommendation.explanation = write_explanation(
+        recommendation, state, room, strategy, simulation, two_pick_override
+    )
 
-    return RecommendationResult(recommendation, board, room, strategy, survival, frame)
+    return RecommendationResult(
+        recommendation, board, room, strategy, survival, frame, simulation
+    )
 
 
 def _overall_confidence(
