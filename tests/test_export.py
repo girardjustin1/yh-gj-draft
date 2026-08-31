@@ -115,11 +115,19 @@ class TestExportContent:
         assert export_board(db, cfg)["players"][0]["adp_sd"] is not None
 
     def test_capabilities_are_declared_honestly(self, seeded):
+        """The page states what it does and does not do; that claim is checked here.
+
+        Since engine.js was ported, survival and the Monte Carlo run in the browser. Live
+        Sleeper sync genuinely cannot, because it needs network calls and the player-id
+        map, so it must stay in the honest "requires the local engine" list.
+        """
         db, cfg = seeded
         caps = export_board(db, cfg)["capabilities"]
-        assert "roster-aware survival probability" in caps["requires_local_engine"]
-        assert "Monte Carlo two-pick expected value" in caps["requires_local_engine"]
-        assert any("ADP-only" in c for c in caps["computed_in_browser"])
+        assert "live Sleeper draft sync" in caps["requires_local_engine"]
+        assert "roster-aware survival probability" in caps["computed_in_browser"]
+        assert "two-pick expected value" in caps["computed_in_browser"]
+        # Nothing may be claimed in two places at once.
+        assert not (set(caps["computed_in_browser"]) & set(caps["requires_local_engine"]))
 
     def test_empty_board_refuses_rather_than_exporting_nothing(self, db, tmp_config):
         with pytest.raises(RuntimeError, match="ff data refresh"):
