@@ -27,6 +27,7 @@ import polars as pl
 
 from .analytics.board import Board
 from .analytics.draft_room import DraftRoomRead
+from .analytics.lineup_value import lineup_upgrades, positional_needs
 from .analytics.outcomes import outcome_label
 from .config import AppConfig
 from .constants import FLEX_ELIGIBILITY, POSITION_ORDER
@@ -142,6 +143,63 @@ class PickAnalysis:
             "unfilled_starters": [s.slot for s in starters if not s.filled],
         }
 
+    def what_i_need(self) -> dict[str, Any]:
+        """What am I short of, and who is the best available player who fixes it?
+
+        The direct answer to "tell me based on what I need". Reported alongside the
+        recommendation rather than folded into it: early in a draft nearly every pick is
+        a bench player by lineup-upgrade, and ranking by need would produce exactly the
+        positional reaches the engine exists to avoid.
+        """
+        roster = self.state.my_roster()
+        lookup = self._player_lookup()
+        slots = fill_lineup(self._league.roster, roster, lookup)
+        filled = {}
+        for slot in slots:
+            if slot.is_bench:
+                continue
+            filled[slot.slot] = filled.get(slot.slot, False) or slot.filled
+
+        needs = positional_needs(self._league, self._roster_players(), filled, self.frame)
+        return {
+            "unfilled": [n.slot for n in needs if not n.filled],
+            "slots": [
+                {
+                    "slot": n.slot,
+                    "eligible": list(n.eligible),
+                    "filled": n.filled,
+                    "best": (
+                        {
+                            "player_key": n.best_player_key,
+                            "name": n.best_name,
+                            "position": n.best_position,
+                            "team": n.best_team,
+                            "draft_now": n.draft_now,
+                            "lineup_upgrade": n.lineup_upgrade,
+                            "probability_gone": n.probability_gone,
+                            "tier": n.tier,
+                        }
+                        if n.best_player_key else None
+                    ),
+                }
+                for n in needs
+            ],
+        }
+
+    def _roster_players(self) -> list[tuple[str, float]]:
+        """``(position, projected_points)`` for everyone already on our roster."""
+        roster = self.state.my_roster()
+        if roster is None or not roster.player_keys:
+            return []
+        projections = dict(
+            zip(self.board.frame["player_key"], self.board.frame["vbd"], strict=True)
+        ) if not self.board.frame.is_empty() else {}
+        out: list[tuple[str, float]] = []
+        for pick in self.state.picks:
+            if pick.player_key in roster.player_keys and pick.position:
+                out.append((pick.position, float(projections.get(pick.player_key) or 0.0)))
+        return out
+
     def who_makes_it_back(self, limit: int = 10) -> list[dict[str, Any]]:
         """Area 4: survival to our next pick, which is the whole point of the app."""
         if self.recommendation.next_pick_overall is None:
@@ -243,6 +301,7 @@ class PickAnalysis:
             "best_available": self.best_available(limit=board_limit),
             "my_roster": self.my_roster(),
             "who_makes_it_back": self.who_makes_it_back(),
+            "what_i_need": self.what_i_need(),
             "what_if": self.what_if(),
             "draft_environment": self.draft_environment(),
             "simulation": (
@@ -419,6 +478,7 @@ def _board_row(row: dict[str, Any], rank: int) -> dict[str, Any]:
         "ceiling": _round(row.get("ceiling_points"), 0),
         "outcome": outcome_label(row),
         "scarcity": _round(row.get("scarcity_score")),
+        "lineup_upgrade": _round(row.get("lineup_upgrade")),
         "confidence": _round(row.get("draft_now_confidence"), 3),
         "two_pick_expected_value": _round(row.get("two_pick_expected_value")),
     }
@@ -481,6 +541,22 @@ def analyze_current_pick(
     result = recommend(
         db, cfg, state, limit=max(limit, 6), simulate=simulate, iterations=iterations
     )
+
+    # Marginal value to *our* starting lineup. Needs the league and the roster, so it is
+    # applied here rather than inside the generic board build.
+    roster_snapshot = state.my_roster()
+    roster_points: list[tuple[str, float]] = []
+    if roster_snapshot and not result.board.frame.is_empty():
+        # VBD, to match how lineup_upgrades values candidates.
+        projections = dict(
+            zip(result.board.frame["player_key"], result.board.frame["vbd"], strict=True)
+        )
+        for pick in state.picks:
+            if pick.player_key in roster_snapshot.player_keys and pick.position:
+                roster_points.append(
+                    (pick.position, float(projections.get(pick.player_key) or 0.0))
+                )
+    result.frame = lineup_upgrades(cfg.league, roster_points, result.frame)
 
     analysis = PickAnalysis(
         state=state,

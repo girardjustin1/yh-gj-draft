@@ -145,6 +145,20 @@ select{background:var(--panel-2);color:var(--text);border:1px solid var(--line);
 .prow.armed .swipehint{opacity:1}
 .prow.taken .pinner{opacity:.4}
 
+/* ---------- what you still need ---------- */
+.needrow{display:grid;grid-template-columns:52px 1fr auto;gap:10px;align-items:center;
+  padding:9px 10px;border-radius:10px;margin-bottom:6px;background:var(--panel-2)}
+.needrow.open{border-left:3px solid var(--warn)}
+.needrow.done{opacity:.5}
+.needslot{font-family:var(--mono);font-size:10.5px;font-weight:750;color:var(--dim);
+  text-align:center}
+.needname{font-size:13.5px;font-weight:650;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.needmeta{font-size:10.5px;color:var(--dim);margin-top:2px}
+.neednum{font-family:var(--mono);text-align:right}
+.neednum .u{font-size:14px;font-weight:750}
+.neednum .g{font-size:10px;color:var(--dim)}
+
 /* ---------- 3. roster ---------- */
 .slot{display:grid;grid-template-columns:48px 1fr;gap:9px;align-items:center;
   padding:8px 10px;border-radius:9px;margin-bottom:5px;background:var(--panel-2)}
@@ -224,6 +238,11 @@ select{background:var(--panel-2);color:var(--text);border:1px solid var(--line);
     </section>
   </div>
 
+  <section class="card" id="needsCard">
+    <h2>What you still need</h2>
+    <div class="body" id="needsBody"><div class="empty">—</div></div>
+  </section>
+
   <div class="grid2">
     <section class="card">
       <h2><span class="n">4</span> Who makes it back to me?</h2>
@@ -250,6 +269,7 @@ select{background:var(--panel-2);color:var(--text);border:1px solid var(--line);
         <option value="adp_value">Sort · ADP value</option>
         <option value="ceiling">Sort · Ceiling</option>
         <option value="floor">Sort · Floor</option>
+        <option value="lineup_upgrade">Sort · Fills my lineup</option>
         <option value="projection">Sort · Projection</option>
       </select>
     </div>
@@ -375,6 +395,41 @@ function renderVor(d){
     the number is how many are expected to go before your next pick.</div>`;
 }
 
+/* ---------- what you still need ---------- */
+function renderNeeds(d){
+  const n=d.what_i_need;
+  if(!n||!n.slots.length){ $("needsBody").innerHTML=`<div class="empty">—</div>`; return; }
+  const open=n.unfilled;
+  $("needsBody").innerHTML=
+    (open.length
+      ? `<div class="muted" style="margin-bottom:9px">Unfilled starting slots:
+         <b style="color:var(--warn)">${open.join(", ")}</b></div>`
+      : `<div class="muted" style="margin-bottom:9px">Every starting slot is filled — you are drafting depth.</div>`)
+    + n.slots.map(s=>{
+      const b=s.best;
+      if(!b) return `<div class="needrow ${s.filled?"done":"open"}">
+        <div class="needslot">${esc(s.slot)}</div>
+        <div class="needname muted">nobody available</div><div></div></div>`;
+      return `<div class="needrow ${s.filled?"done":"open"}">
+        <div class="needslot">${esc(s.slot)}</div>
+        <div>
+          <div class="needname">${esc(b.name)}</div>
+          <div class="needmeta"><span class="posdot ${posClass(b.position)}">${esc(b.position)}</span>
+            ${esc(b.team??"")} · DN ${fmt(b.draft_now)}${b.tier?` · T${b.tier}`:""}</div>
+        </div>
+        <div class="neednum">
+          <div class="u">+${fmt(b.lineup_upgrade,0)}</div>
+          <div class="g" style="color:${urgency(b.probability_gone)}">${pct(b.probability_gone)} gone</div>
+        </div>
+      </div>`;
+    }).join("")
+    + `<div class="muted" style="margin-top:8px">
+       <b>+N</b> is the value this player adds to your <i>starting lineup</i>, in VBD —
+       so a fourth running back scores low once your RB and FLEX slots are full.
+       Shown to inform the pick, not to override it: reaching for a hole is how drafts
+       go wrong.</div>`;
+}
+
 /* ---------- 4 ---------- */
 function renderSurvival(d){
   const rows=d.who_makes_it_back;
@@ -462,6 +517,7 @@ function renderList(){
             ${r.bye_week?`<span>bye ${r.bye_week}</span>`:""}
             ${r.tier?`<span>T${r.tier}</span>`:""}
             <span>${fmt(r.floor,0)}–${fmt(r.ceiling,0)}</span>
+            ${r.lineup_upgrade!=null?`<span>+${fmt(r.lineup_upgrade,0)} lineup</span>`:""}
           </div>
         </div>
         <div class="pnums">
@@ -555,7 +611,7 @@ async function onClock(showBusy=true){
   try{
     const d=await api("/api/on-clock",{refresh:true,simulate:true,limit:140});
     LATEST=d;
-    renderClock(d); renderVor(d); renderSurvival(d); renderWhatIf(d);
+    renderClock(d); renderVor(d); renderNeeds(d); renderSurvival(d); renderWhatIf(d);
     renderList(); renderRoster(d); renderEnv(d);
     if(d.sync_error) alert_(`Live sync did not run — using the stored board. <span class="muted">${esc(d.sync_error)}</span>`);
   }catch(e){

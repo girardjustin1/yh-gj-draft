@@ -1114,48 +1114,66 @@ def draft_start(
 @draft_app.command("pick")
 def draft_pick(
     ctx: typer.Context,
-    name: Annotated[str, typer.Argument(help="Player just selected.")],
+    names: Annotated[
+        list[str],
+        typer.Argument(help="Players selected, in draft order. Several may be given at once."),
+    ],
     draft_id: Annotated[str | None, typer.Option("--draft-id")] = None,
 ) -> None:
-    """Record a selection by hand."""
+    """Record one or more selections by hand, in draft order.
+
+    Several at once is the normal case: between your turns eleven other managers pick,
+    and catching up in one command beats eleven. Order matters only for attributing picks
+    to the right opponents; the pool and your own roster are correct either way.
+    """
     from . import queries
     from .draft.store import load_state, record_pick
 
     cfg = get_config(ctx)
+    recorded: list[tuple[str, int, int, str]] = []
+
     with connect(cfg.paths.db_path) as db:
         state = load_state(db, draft_id)
         if state is None:
             err_console.print("No draft. Run [bold]ff draft start[/bold] first.")
             raise typer.Exit(code=1)
 
-        match = queries.resolve_one(db, name)
-        if match is None:
-            err_console.print(
-                f"[red]Could not resolve[/red] {name!r} to exactly one player. "
-                "Try a fuller name."
+        for name in names:
+            match = queries.resolve_one(db, name)
+            if match is None:
+                err_console.print(
+                    f"[red]Could not resolve[/red] {name!r} to exactly one player."
+                    + (f" Recorded {len(recorded)} before this." if recorded else "")
+                )
+                raise typer.Exit(code=1)
+            try:
+                state = record_pick(
+                    db, state, match["player_key"], match["full_name"],
+                    match["position"], match["team"],
+                )
+            except ValueError as exc:
+                err_console.print(f"[red]{exc}[/red]")
+                raise typer.Exit(code=1) from exc
+            last = state.picks[-1]
+            recorded.append(
+                (last.player_name or name, last.overall, last.slot, last.position or "")
             )
-            raise typer.Exit(code=1)
 
-        try:
-            state = record_pick(
-                db, state, match["player_key"], match["full_name"],
-                match["position"], match["team"],
-            )
-        except ValueError as exc:
-            err_console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(code=1) from exc
+        my_slot, is_mine, until = state.my_slot, state.is_my_pick, state.picks_until_my_turn
+        board = state.board
 
-        last = state.picks[-1]
-
-    marker = " [bold green]← yours[/bold green]" if last.slot == state.my_slot else ""
-    console.print(
-        f"{OK} {state.board.label(last.overall)} slot {last.slot}: "
-        f"[bold]{last.player_name}[/bold] ({last.position}, {last.nfl_team}){marker}"
-    )
-    if state.is_my_pick:
-        console.print("\n[bold green]YOU ARE ON THE CLOCK[/bold green] — run [bold]ff on-clock[/bold]")
-    elif state.picks_until_my_turn is not None:
-        console.print(f"[dim]{state.picks_until_my_turn} picks until your turn.[/dim]")
+    for player_name, overall, slot, position in recorded:
+        marker = " [bold green]← yours[/bold green]" if slot == my_slot else ""
+        console.print(
+            f"{OK} {board.label(overall)} slot {slot}: "
+            f"[bold]{player_name}[/bold] ({position}){marker}"
+        )
+    if is_mine:
+        console.print(
+            "\n[bold green]YOU ARE ON THE CLOCK[/bold green] — run [bold]ff on-clock[/bold]"
+        )
+    elif until is not None:
+        console.print(f"[dim]{until} picks until your turn.[/dim]")
 
 
 @draft_app.command("undo")
@@ -1376,6 +1394,47 @@ def _render_on_clock(analysis, limit: int = 8, position: str | None = None) -> N
                 "best path" if i == 0 else f"{row['delta_vs_best']}",
             )
         console.print(table)
+
+    # ---- WHAT YOU STILL NEED ----------------------------------------------------------
+    needs = analysis.what_i_need()
+    if needs["slots"]:
+        console.print()
+        console.rule("[bold]WHAT YOU STILL NEED[/bold]", style="cyan")
+        table = Table(header_style="bold", box=None)
+        table.add_column("Slot", style="cyan", no_wrap=True)
+        table.add_column("Best available", no_wrap=True, min_width=20)
+        table.add_column("Pos", justify="center")
+        table.add_column("Draft Now", justify="right")
+        table.add_column("Adds to lineup", justify="right")
+        table.add_column("Gone by next", justify="right")
+        for slot in needs["slots"]:
+            best = slot["best"]
+            label = slot["slot"] if slot["filled"] else f"[yellow]{slot['slot']}[/yellow]"
+            if best is None:
+                table.add_row(label, "[dim]nobody available[/dim]", "", "", "", "")
+                continue
+            gone = best["probability_gone"]
+            gone_text = (
+                "[dim]?[/dim]" if gone is None
+                else (f"[red]{gone * 100:.0f}%[/red]" if gone >= 0.7
+                      else (f"[yellow]{gone * 100:.0f}%[/yellow]" if gone >= 0.4
+                            else f"[green]{gone * 100:.0f}%[/green]"))
+            )
+            table.add_row(
+                label,
+                best["name"] if slot["filled"] else f"[bold]{best['name']}[/bold]",
+                best["position"], _num(best["draft_now"]),
+                f"+{_num(best['lineup_upgrade'], 0)}", gone_text,
+            )
+        console.print(table)
+        unfilled = needs["unfilled"]
+        console.print(
+            f"[dim]Unfilled starting slots: "
+            f"{', '.join(unfilled) if unfilled else 'none — you are drafting depth'}.  "
+            "'Adds to lineup' is VBD added to your starting eleven, so a fourth back "
+            "scores low once RB and FLEX are full. Informs the pick; does not override "
+            "it.[/dim]"
+        )
 
     # ---- 2. BEST AVAILABLE -----------------------------------------------------------
     rows = analysis.best_available(limit=limit, position=position)
