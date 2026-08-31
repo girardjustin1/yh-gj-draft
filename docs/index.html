@@ -81,178 +81,6 @@ button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
   border:1px solid var(--line);font-size:12.5px;display:flex;gap:6px;align-items:center}
 .altchip b{font-family:var(--mono)}
 
-/* ---------- positional value bars (from the reference app) ---------- */
-.vorlegend{font-size:10.5px;color:var(--dim);display:flex;justify-content:space-between;
-  margin-bottom:9px}
-.vorrow{display:grid;grid-template-columns:34px 1fr auto;gap:9px;align-items:center;
-  margin-bottom:7px}
-.vorlabel{font-size:11px;font-weight:800;text-align:center;padding:3px 0;border-radius:6px;
-  color:#08121c}
-.vortrack{height:22px;background:var(--panel-2);border-radius:7px;overflow:hidden}
-.vortrack>span{display:block;height:100%;border-radius:7px;transition:width .35s ease}
-.vornum{font-family:var(--mono);font-size:12px;color:var(--dim);min-width:52px;text-align:right}
-
-/* ---------- 4. survival ---------- */
-.survrow{display:grid;grid-template-columns:1fr 44px;gap:10px;align-items:center;padding:7px 0}
-.survrow+.survrow{border-top:1px solid #1d242d}
-.survname{font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;
-  text-overflow:ellipsis}
-.bar{height:6px;border-radius:3px;background:#242c36;overflow:hidden;margin-top:5px}
-.bar>span{display:block;height:100%;border-radius:3px}
-.survpct{font-family:var(--mono);font-size:14.5px;font-weight:750;text-align:right}
-
-/* ---------- 5. what if ---------- */
-.wi{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:10px 11px;
-  border-radius:11px;background:var(--panel-2);border:1px solid var(--line);margin-bottom:7px}
-.wi.best{border-color:#2f6b3f;background:#152218}
-.wi .n{font-weight:650;font-size:13.5px}
-.wi .p{color:var(--dim);font-size:11px;font-family:var(--mono);margin-top:3px}
-.wi .c{font-family:var(--mono);font-size:18px;font-weight:750;text-align:right}
-.wi .d{font-size:10px;color:var(--dim);text-align:right}
-
-/* ---------- 2. player list ---------- */
-.tabs{display:flex;gap:4px;padding:9px 11px 0}
-.tab2{flex:1;padding:8px 0;text-align:center;font-size:12.5px;font-weight:650;
-  color:var(--dim);border-bottom:2px solid transparent}
-.tab2.on{color:var(--text);border-bottom-color:var(--accent)}
-.filters{display:flex;gap:6px;overflow-x:auto;padding:10px 11px;scrollbar-width:none;
-  -webkit-overflow-scrolling:touch}
-.filters::-webkit-scrollbar{display:none}
-.pillbtn{padding:6px 13px;border-radius:999px;background:var(--panel-2);
-  border:1px solid var(--line);color:var(--dim);font-size:12.5px;white-space:nowrap;flex:none}
-.pillbtn.on{background:var(--accent);border-color:var(--accent);color:#06121f;font-weight:700}
-.sortbar{display:flex;gap:8px;align-items:center;padding:0 11px 10px}
-select{background:var(--panel-2);color:var(--text);border:1px solid var(--line);
-  border-radius:9px;padding:7px 9px;font-size:12.5px;flex:1;min-width:0}
-
-.plist{list-style:none;margin:0;padding:0}
-.prow{position:relative;overflow:hidden;border-top:1px solid #1c232c}
-.pinner{display:grid;grid-template-columns:1fr auto auto;gap:9px;align-items:center;
-  padding:10px 11px;background:var(--panel);transition:transform .18s ease;
-  touch-action:pan-y}
-.pmain{min-width:0}
-.pname{font-size:14.5px;font-weight:650;white-space:nowrap;overflow:hidden;
-  text-overflow:ellipsis}
-.pmeta{font-size:11px;color:var(--dim);margin-top:3px;display:flex;gap:6px;align-items:center}
-.pnums{text-align:right;font-family:var(--mono);line-height:1.25}
-.pnums .a{font-size:15px;font-weight:750}
-.pnums .b{font-size:10.5px;color:var(--dim)}
-.gonebadge{min-width:44px;text-align:center;font-family:var(--mono);font-size:12.5px;
-  font-weight:750;padding:5px 4px;border-radius:8px;background:var(--panel-2)}
-.swipehint{position:absolute;inset:0;display:flex;align-items:center;justify-content:flex-end;
-  padding-right:16px;background:linear-gradient(90deg,transparent,#5c2626);
-  font-size:12px;font-weight:700;color:#ffd9d9;pointer-events:none;opacity:0}
-.prow.armed .swipehint{opacity:1}
-.prow.taken .pinner{opacity:.4}
-
-/* ---------- what you still need ---------- */
-.needrow{display:grid;grid-template-columns:52px 1fr auto;gap:10px;align-items:center;
-  padding:9px 10px;border-radius:10px;margin-bottom:6px;background:var(--panel-2)}
-.needrow.open{border-left:3px solid var(--warn)}
-.needrow.done{opacity:.5}
-.needslot{font-family:var(--mono);font-size:10.5px;font-weight:750;color:var(--dim);
-  text-align:center}
-.needname{font-size:13.5px;font-weight:650;white-space:nowrap;overflow:hidden;
-  text-overflow:ellipsis}
-.needmeta{font-size:10.5px;color:var(--dim);margin-top:2px}
-.neednum{font-family:var(--mono);text-align:right}
-.neednum .u{font-size:14px;font-weight:750}
-.neednum .g{font-size:10px;color:var(--dim)}
-
-/* ---------- how it works ---------- */
-.how{margin:0;padding-left:20px;font-size:13px;line-height:1.65;color:#c5d2de}
-.how li{margin-bottom:6px}
-.btn-mine,.btn-gone{display:inline-block;padding:1px 7px;border-radius:6px;
-  font-size:10.5px;font-weight:800;letter-spacing:.3px;vertical-align:1px}
-.btn-mine{background:var(--good);color:#06170c}
-.btn-gone{background:var(--panel-2);border:1px solid var(--line-2);color:var(--dim)}
-
-/* ---------- search ---------- */
-.searchbar{display:flex;gap:7px;padding:10px 11px 0}
-#searchBox{flex:1;min-width:0;background:var(--panel-2);border:1px solid var(--line);
-  border-radius:10px;padding:10px 12px;color:var(--text);font-size:15px;
-  -webkit-appearance:none}
-#searchBox:focus{outline:none;border-color:var(--accent)}
-#searchBox::placeholder{color:var(--dimmer)}
-
-/* ---------- two-button pick recording ---------- */
-.pactions{display:flex;gap:6px;flex:none}
-.pbtn{padding:8px 11px;border-radius:9px;font-size:11px;font-weight:800;letter-spacing:.3px;
-  border:1px solid var(--line);background:var(--panel-2);color:var(--dim);white-space:nowrap}
-.pbtn.mine{background:var(--good);border-color:var(--good);color:#06170c}
-.pbtn:active{transform:scale(.94)}
-.pinner{grid-template-columns:1fr auto auto auto}
-
-/* ---------- draft button + taken swipe ---------- */
-.pinner{grid-template-columns:auto 1fr auto auto}
-.draftbtn{padding:9px 12px;border-radius:9px;background:var(--accent);color:#06121f;
-  font-size:11px;font-weight:850;letter-spacing:.4px;flex:none}
-.draftbtn:active{transform:scale(.93)}
-.swipehint{background:linear-gradient(90deg,transparent 20%,var(--bad));
-  color:#fff;font-weight:850;letter-spacing:1px;font-size:13px;opacity:0}
-.prow.armed .swipehint{opacity:1}
-
-/* ---------- now -> then path ---------- */
-.pathline{display:grid;grid-template-columns:1fr 30px 108px;gap:10px;align-items:center;
-  padding:12px;background:var(--panel-2);border-radius:12px;border:1px solid var(--line)}
-.steplbl{font-size:9.5px;letter-spacing:.9px;text-transform:uppercase;color:var(--dim);
-  font-weight:750;margin-bottom:4px}
-.patharrow{font-size:22px;color:var(--dimmer);text-align:center}
-.paththen{text-align:center}
-.thenpos{font-size:26px;font-weight:850;letter-spacing:-.5px;padding:5px 0;border-radius:9px;
-  color:#08121c;margin:2px 0}
-.thenpos.pos-QB{background:var(--qb)}.thenpos.pos-RB{background:var(--rb)}
-.thenpos.pos-WR{background:var(--wr)}.thenpos.pos-TE{background:var(--te)}
-.paththen .recsub{font-size:10px;margin-top:2px}
-@media(max-width:430px){
-  .pathline{grid-template-columns:1fr 24px 88px;padding:10px}
-  .thenpos{font-size:22px}
-  .recname{font-size:23px}
-}
-
-/* ---------- suggested picks ---------- */
-.sugg{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;
-  padding:10px 11px;border-radius:11px;background:var(--panel-2);
-  border:1px solid var(--line);margin-bottom:7px}
-.sugg.top{border-color:#2f6b3f;background:#152218}
-.suggname{font-size:16px;font-weight:750;letter-spacing:-.2px}
-.suggmeta{font-size:11px;color:var(--dim);margin-top:3px;display:flex;gap:6px;align-items:center}
-
-/* ---------- my team ---------- */
-.teamslot{display:grid;grid-template-columns:46px 1fr auto;gap:10px;align-items:center;
-  padding:9px 10px;border-bottom:1px solid #1c232c}
-.teamslot .lbl{font-size:11px;font-weight:850;text-align:center;padding:4px 0;
-  border-radius:6px;color:#08121c}
-.teamslot.empty .who{color:var(--dimmer);font-style:italic;font-size:13px}
-.undraft{padding:6px 10px;border-radius:8px;border:1px solid var(--line-2);
-  background:transparent;color:var(--dim);font-size:11px;font-weight:700}
-
-/* ---------- draft button + taken swipe ---------- */
-.pinner{grid-template-columns:auto 1fr auto auto}
-.draftbtn{padding:9px 12px;border-radius:9px;background:var(--accent);color:#06121f;
-  font-size:11px;font-weight:850;letter-spacing:.4px;flex:none}
-.draftbtn:active{transform:scale(.93)}
-.swipehint{background:linear-gradient(90deg,transparent 20%,var(--bad));
-  color:#fff;font-weight:850;letter-spacing:1px;font-size:13px;opacity:0}
-.prow.armed .swipehint{opacity:1}
-
-/* ---------- suggested picks ---------- */
-.sugg{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;
-  padding:10px 11px;border-radius:11px;background:var(--panel-2);
-  border:1px solid var(--line);margin-bottom:7px}
-.sugg.top{border-color:#2f6b3f;background:#152218}
-.suggname{font-size:16px;font-weight:750;letter-spacing:-.2px}
-.suggmeta{font-size:11px;color:var(--dim);margin-top:3px;display:flex;gap:6px;align-items:center}
-
-/* ---------- my team ---------- */
-.teamslot{display:grid;grid-template-columns:46px 1fr auto;gap:10px;align-items:center;
-  padding:9px 10px;border-bottom:1px solid #1c232c}
-.teamslot .lbl{font-size:11px;font-weight:850;text-align:center;padding:4px 0;
-  border-radius:6px;color:#08121c}
-.teamslot.empty .who{color:var(--dimmer);font-style:italic;font-size:13px}
-.undraft{padding:6px 10px;border-radius:8px;border:1px solid var(--line-2);
-  background:transparent;color:var(--dim);font-size:11px;font-weight:700}
-
 /* ---------- team strength ---------- */
 .strow{display:grid;grid-template-columns:34px 1fr 78px;gap:9px;align-items:start;
   margin-bottom:11px}
@@ -389,11 +217,6 @@ select{background:var(--panel-2);color:var(--text);border:1px solid var(--line);
       <div class="body" id="whatIfBody"><div class="empty">—</div></div>
     </section>
   </div>
-
-  <section class="card">
-    <h2>Positional value on the board</h2>
-    <div class="body" id="vorBody"><div class="empty">—</div></div>
-  </section>
 
   <section class="card">
     <h2>Starting lineup</h2>
@@ -968,26 +791,6 @@ function renderClock(d){
 }
 
 /* ---------- positional value bars ---------- */
-function renderVor(d){
-  const env=d.draft_environment;
-  const rows=["QB","RB","WR","TE"].filter(p=>env[p]);
-  if(!rows.length){ $("vorBody").innerHTML=`<div class="empty">—</div>`; return; }
-  const max=Math.max(...rows.map(p=>env[p].scarcity),1);
-  $("vorBody").innerHTML=`
-    <div class="vorlegend"><span>Based on who is left + your roster</span><span>LOW → HIGH</span></div>
-    ${rows.map(p=>{
-      const e=env[p], w=Math.max(4,Math.round(100*e.scarcity/max));
-      return `<div class="vorrow">
-        <div class="vorlabel ${posClass(p)}">${p}</div>
-        <div class="vortrack"><span style="width:${w}%;background:var(--${p.toLowerCase()})"></span></div>
-        <div class="vornum">${fmt(e.expected_gone_before_next_pick,1)} gone</div>
-      </div>`;
-    }).join("")}
-    <div class="muted" style="margin-top:8px">Bar length is positional scarcity right now;
-    the number is how many are expected to go before your next pick.</div>`;
-}
-
-/* ---------- team strength ---------- */
 function renderStrength(d){
   const ts=d.team_strength;
   if(!ts||!ts.positions.length){ $("strengthBody").innerHTML=`<div class="empty">—</div>`; return; }
@@ -1250,7 +1053,7 @@ async function onClock(showBusy=true){
   try{
     const d=await api("/api/on-clock",{refresh:true,simulate:true,limit:140});
     LATEST=d;
-    renderClock(d); renderVor(d); renderStrength(d); renderNeeds(d);
+    renderClock(d); renderStrength(d); renderNeeds(d);
     renderSurvival(d); renderWhatIf(d);
     renderList(); renderRoster(d); renderEnv(d);
     if(d.sync_error) alert_(`Live sync did not run — using the stored board. <span class="muted">${esc(d.sync_error)}</span>`);
