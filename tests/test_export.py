@@ -123,7 +123,13 @@ class TestExportContent:
         """
         db, cfg = seeded
         caps = export_board(db, cfg)["capabilities"]
-        assert "live Sleeper draft sync" in caps["requires_local_engine"]
+        # Only genuine impossibilities belong here. Sleeper serves CORS "*", and both
+        # the strategy classifier and draft-room read are pure functions of state the
+        # browser already has — calling those "requires the local engine" was false.
+        assert caps["requires_local_engine"] == [
+            "re-scoring the board after a data refresh"
+        ]
+        assert "live Sleeper draft sync" in caps["not_yet_in_browser"]
         assert "roster-aware survival probability" in caps["computed_in_browser"]
         assert "two-pick expected value" in caps["computed_in_browser"]
         # Nothing may be claimed in two places at once.

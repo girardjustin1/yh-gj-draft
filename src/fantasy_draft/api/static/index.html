@@ -592,7 +592,11 @@ function renderOfflineBanner(d){
      ${esc(d.generated_at.slice(0,10))}. Survival probability, the Monte Carlo and
      two-pick expected value run here in the browser from a port that is tested against
      the Python original on every build.<br>
-     <b>Still needs the local engine:</b> ${cap.requires_local_engine.join(", ")}.`);
+     <b>Only in the local engine:</b> ${cap.requires_local_engine.join(", ")} —
+     that needs the historical tables and DuckDB.
+     ${cap.not_yet_in_browser?.length
+       ? `<br><b>Not built here yet</b> (possible, just not done):
+          ${cap.not_yet_in_browser.join(", ")}.` : ""}`);
 }
 
 function offlineSetSlot(){

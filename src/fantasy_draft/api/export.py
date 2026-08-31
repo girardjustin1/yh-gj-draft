@@ -133,11 +133,21 @@ def export_board(db: Database, cfg: AppConfig, limit: int = 400) -> dict[str, An
                 "two-pick expected value",
                 "marginal lineup value",
             ],
+            # Only what genuinely cannot run in a browser. Re-scoring needs the
+            # historical nflverse tables and DuckDB — 200k+ rows — so the board must be
+            # rebuilt in Python and redeployed.
             "requires_local_engine": [
+                "re-scoring the board after a data refresh",
+            ],
+            # Buildable in the browser, simply not built yet. Listed separately so the
+            # page does not claim a limitation it does not have: Sleeper serves
+            # access-control-allow-origin *, so the page could poll it directly, and both
+            # the strategy classifier and the draft-room read are pure functions of state
+            # we already hold here.
+            "not_yet_in_browser": [
                 "live Sleeper draft sync",
                 "adaptive strategy state",
                 "draft-room run analysis",
-                "re-scoring after a data refresh",
             ],
         },
     }
