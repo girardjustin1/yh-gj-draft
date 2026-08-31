@@ -471,3 +471,58 @@ class TestWhatINeedArea:
         need = analyze_current_pick(tmp_config, db, refresh=False).what_i_need()
         assert isinstance(need["unfilled"], list)
         assert {s["slot"] for s in need["slots"]} >= {"QB", "RB", "WR", "TE"}
+
+
+class TestTeamStrength:
+    """Strength only means something relative to someone — here, your actual league."""
+
+    def _drafted(self, db, tmp_config, my_positions, other_positions):
+        from fantasy_draft.draft.store import create_manual_draft, record_pick
+
+        state = create_manual_draft(db, tmp_config.league, draft_id="strength")
+        keys = iter(f"00-000{i:04d}" for i in range(200))
+        for mine, positions in ((True, my_positions), (False, other_positions)):
+            for position in positions:
+                record_pick(db, state, next(keys), "P", position, "KC", mine=mine)
+        return state
+
+    def test_reports_a_row_per_position(self, tmp_config, db):
+        from fantasy_draft.draft.store import save_state
+
+        save_state(db, build_fixture_draft(picks_made=41, slot=7))
+        strength = analyze_current_pick(tmp_config, db, refresh=False).team_strength()
+        assert {r["position"] for r in strength["positions"]} == {"QB", "RB", "WR", "TE"}
+
+    def test_rank_is_out_of_the_number_of_teams(self, tmp_config, db):
+        from fantasy_draft.draft.store import save_state
+
+        save_state(db, build_fixture_draft(picks_made=41, slot=7))
+        strength = analyze_current_pick(tmp_config, db, refresh=False).team_strength()
+        for row in strength["positions"]:
+            assert 1 <= row["rank"] <= row["teams"]
+            assert 0 <= row["percentile"] <= 100
+
+    def test_priority_favours_an_empty_slot(self, tmp_config, db):
+        from fantasy_draft.draft.store import save_state
+
+        save_state(db, build_fixture_draft(picks_made=41, slot=7))
+        analysis = analyze_current_pick(tmp_config, db, refresh=False)
+        rows = {r["position"]: r for r in analysis.team_strength()["positions"]}
+        # Nothing is rostered in the fixture's own keys, so every slot is open and
+        # priority must be high everywhere rather than silently zero.
+        assert all(r["priority"] > 0 for r in rows.values())
+
+    def test_top_priority_is_the_highest_scoring_row(self, tmp_config, db):
+        from fantasy_draft.draft.store import save_state
+
+        save_state(db, build_fixture_draft(picks_made=41, slot=7))
+        strength = analyze_current_pick(tmp_config, db, refresh=False).team_strength()
+        assert strength["top_priority"] == strength["positions"][0]["position"]
+
+    def test_payload_includes_it(self, tmp_config, db):
+        from fantasy_draft.draft.store import save_state
+
+        save_state(db, build_fixture_draft(picks_made=41, slot=7))
+        payload = analyze_current_pick(tmp_config, db, refresh=False).to_dict()
+        assert "team_strength" in payload
+        json.dumps(payload)

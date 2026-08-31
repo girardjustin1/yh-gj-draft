@@ -77,6 +77,9 @@ class PickAnalysis:
     synced: bool = False
     sync_error: str | None = None
     generated_at: datetime = field(default_factory=datetime.now)
+    #: VBD for every player, drafted included. The board only carries the available
+    #: ones, so team strength would score every rostered player at zero without this.
+    all_vbd: dict[str, float] = field(default_factory=dict)
 
     # --- the five areas -------------------------------------------------------------
 
@@ -200,6 +203,110 @@ class PickAnalysis:
                 out.append((pick.position, float(projections.get(pick.player_key) or 0.0)))
         return out
 
+    def team_strength(self) -> dict[str, Any]:
+        """How strong is my roster at each position — measured against my actual league.
+
+        "Strong at running back" is only meaningful relative to someone. Against a
+        preseason ideal it is noise; against the eleven other teams in this draft it is
+        the thing that decides matchups, and we already hold their rosters because we
+        rebuilt them from the pick history.
+
+        So strength is our summed value over replacement at a position expressed as a
+        percentile among the league's teams, and priority combines being weak there with
+        still needing the slot and the position drying up.
+        """
+        league = self._league
+        frame = self.board.frame
+        available_vbd = (
+            dict(zip(frame["player_key"], frame["vbd"], strict=True))
+            if not frame.is_empty() and "vbd" in frame.columns else {}
+        )
+        vbd = {**self.all_vbd, **available_vbd}
+        position_of = {
+            pick.player_key: pick.position for pick in self.state.picks if pick.player_key
+        }
+
+        rosters = self.state.rosters()
+        me = self.state.my_team_id
+        totals: dict[str, dict[str, float]] = {}
+        for team_id, snapshot in rosters.items():
+            per_position: dict[str, float] = {}
+            for key in snapshot.player_keys:
+                position = position_of.get(key)
+                if not position:
+                    continue
+                per_position[position] = per_position.get(position, 0.0) + float(
+                    vbd.get(key) or 0.0
+                )
+            totals[team_id] = per_position
+
+        my_totals = totals.get(me or "", {})
+        counts = dict(self.state.my_roster().position_counts) if self.state.my_roster() else {}
+        need = self.what_i_need()
+        unfilled = set(need["unfilled"])
+        scarcity = self.board.scarcity
+        losses = (
+            self.simulation.expected_position_losses if self.simulation else {}
+        )
+
+        rows = []
+        for position in ("QB", "RB", "WR", "TE"):
+            mine = my_totals.get(position, 0.0)
+            others = sorted(t.get(position, 0.0) for tid, t in totals.items() if tid != me)
+            below = sum(1 for value in others if value < mine)
+            percentile = (below / len(others) * 100.0) if others else 50.0
+
+            required = league.roster.dedicated.get(position, 0)
+            have = counts.get(position, 0)
+            slot_open = position in unfilled or any(
+                position in s for s in unfilled if s in {"FLEX", "SUPERFLEX"}
+            )
+            entry = scarcity.get(position)
+            best = next(
+                (r for r in self.best_available(limit=200) if r["position"] == position),
+                None,
+            )
+
+            # Priority: weak here, still short here, and it is draining.
+            drain = min(1.0, float(losses.get(position, 0.0)) / 4.0)
+            priority = (
+                0.45 * (100.0 - percentile)
+                + 0.35 * (100.0 if slot_open else 25.0)
+                + 0.20 * (drain * 100.0)
+            )
+
+            rows.append(
+                {
+                    "position": position,
+                    "my_value": round(mine, 1),
+                    "league_median": round(
+                        others[len(others) // 2] if others else 0.0, 1
+                    ),
+                    "percentile": round(percentile),
+                    "rank": len(others) + 1 - below,
+                    "teams": len(others) + 1,
+                    "have": have,
+                    "starters_required": required,
+                    "slot_open": slot_open,
+                    "expected_gone_before_next_pick": round(
+                        float(losses.get(position, 0.0)), 1
+                    ),
+                    "startable_available": entry.startable_available if entry else None,
+                    "priority": round(min(100.0, max(0.0, priority))),
+                    "best_available": (
+                        {
+                            "name": best["name"], "player_key": best["player_key"],
+                            "draft_now": best["draft_now"],
+                            "probability_gone": best["probability_gone"],
+                        } if best else None
+                    ),
+                }
+            )
+
+        rows.sort(key=lambda r: -r["priority"])
+        weakest = rows[0]["position"] if rows else None
+        return {"positions": rows, "top_priority": weakest}
+
     def who_makes_it_back(self, limit: int = 10) -> list[dict[str, Any]]:
         """Area 4: survival to our next pick, which is the whole point of the app."""
         if self.recommendation.next_pick_overall is None:
@@ -302,6 +409,7 @@ class PickAnalysis:
             "my_roster": self.my_roster(),
             "who_makes_it_back": self.who_makes_it_back(),
             "what_i_need": self.what_i_need(),
+            "team_strength": self.team_strength(),
             "what_if": self.what_if(),
             "draft_environment": self.draft_environment(),
             "simulation": (
@@ -558,6 +666,25 @@ def analyze_current_pick(
                 )
     result.frame = lineup_upgrades(cfg.league, roster_points, result.frame)
 
+    # VBD for the whole universe, including players already off the board. Replacement
+    # level comes from the board (derived, correctly, from the full pool) so a drafted
+    # player is valued on exactly the same scale as an available one.
+    all_vbd: dict[str, float] = {}
+    try:
+        from .analytics.projections import consensus_projections
+
+        every = consensus_projections(db, cfg)
+        if not every.is_empty():
+            levels = {p: level.points for p, level in result.board.replacement.items()}
+            for row in every.select("player_key", "position", "projected_points").iter_rows(
+                named=True
+            ):
+                base = levels.get(row["position"])
+                if base is not None and row["projected_points"] is not None:
+                    all_vbd[row["player_key"]] = float(row["projected_points"]) - base
+    except Exception as exc:  # noqa: BLE001 — team strength is a readout, never the pick
+        log.warning("could not value drafted players", extra={"error": str(exc)})
+
     analysis = PickAnalysis(
         state=state,
         recommendation=result.recommendation,
@@ -569,6 +696,7 @@ def analyze_current_pick(
         provider=provider_name,
         synced=synced,
         sync_error=sync_error,
+        all_vbd=all_vbd,
     )
     analysis._league = cfg.league
     return analysis

@@ -1119,6 +1119,10 @@ def draft_pick(
         typer.Argument(help="Players selected, in draft order. Several may be given at once."),
     ],
     draft_id: Annotated[str | None, typer.Option("--draft-id")] = None,
+    mine: Annotated[
+        bool | None,
+        typer.Option("--mine/--theirs", help="Whose pick this was. Inferred if omitted."),
+    ] = None,
 ) -> None:
     """Record one or more selections by hand, in draft order.
 
@@ -1149,21 +1153,22 @@ def draft_pick(
             try:
                 state = record_pick(
                     db, state, match["player_key"], match["full_name"],
-                    match["position"], match["team"],
+                    match["position"], match["team"], mine=mine,
                 )
             except ValueError as exc:
                 err_console.print(f"[red]{exc}[/red]")
                 raise typer.Exit(code=1) from exc
             last = state.picks[-1]
             recorded.append(
-                (last.player_name or name, last.overall, last.slot, last.position or "")
+                (last.player_name or name, last.overall, last.slot, last.position or "",
+                 last.team_id == state.my_team_id)
             )
 
-        my_slot, is_mine, until = state.my_slot, state.is_my_pick, state.picks_until_my_turn
+        is_mine, until = state.is_my_pick, state.picks_until_my_turn
         board = state.board
 
-    for player_name, overall, slot, position in recorded:
-        marker = " [bold green]← yours[/bold green]" if slot == my_slot else ""
+    for player_name, overall, slot, position, was_ours in recorded:
+        marker = " [bold green]← yours[/bold green]" if was_ours else ""
         console.print(
             f"{OK} {board.label(overall)} slot {slot}: "
             f"[bold]{player_name}[/bold] ({position}){marker}"

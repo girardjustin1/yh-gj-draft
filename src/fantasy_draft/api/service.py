@@ -56,6 +56,9 @@ class PickRequest(BaseModel):
     player_key: str | None = None
     name: str | None = None
     draft_id: str | None = None
+    mine: bool | None = Field(
+        None, description="True if you drafted them, False if another manager did."
+    )
 
 
 class StartDraftRequest(BaseModel):
@@ -247,7 +250,9 @@ def create_app(cfg: AppConfig | None = None) -> FastAPI:
                 name, position, team = row["full_name"], row["position"], row["team"]
 
             try:
-                state = record_pick(db, state, player_key, name, position, team)
+                state = record_pick(
+                    db, state, player_key, name, position, team, mine=request.mine
+                )
             except ValueError as exc:
                 raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -259,7 +264,7 @@ def create_app(cfg: AppConfig | None = None) -> FastAPI:
                     "slot": last.slot,
                     "name": last.player_name,
                     "position": last.position,
-                    "was_ours": last.slot == state.my_slot,
+                    "was_ours": last.team_id == state.my_team_id,
                 },
                 "picks_made": state.picks_made,
                 "is_my_pick": state.is_my_pick,

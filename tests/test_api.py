@@ -287,3 +287,57 @@ class TestInsecureBindRefusal:
         monkeypatch.setattr("uvicorn.run", lambda *a, **k: started.update(k) or None)
         svc.run(host="0.0.0.0", port=8123)
         assert started["host"] == "0.0.0.0"
+
+
+class TestDraftControls:
+    """Two explicit controls, because inferring ownership from pick order confused me
+    into shipping something the user could not follow: DRAFT means I took him, swipe
+    means someone else did."""
+
+    def test_page_offers_both_controls(self, client):
+        page = client.get("/").text
+        assert "DRAFT" in page                 # the blue button
+        assert ">TAKEN<" in page               # the swipe reveal
+        assert "data-act=\"draft\"" in page
+
+    def test_page_has_a_search_box(self, client):
+        page = client.get("/").text
+        assert 'id="searchBox"' in page
+        assert "matchesQuery" in page
+
+    def test_page_explains_itself(self, client):
+        """"I don't get how this app works" is a bug in the page, not the reader."""
+        page = client.get("/").text
+        assert "How this works" in page
+        assert "Set your draft slot" in page
+
+    def test_page_shows_team_strength(self, client):
+        page = client.get("/").text
+        assert "Team strength by position" in page
+        assert "renderStrength" in page
+
+    def test_mine_flag_puts_the_player_on_my_roster(self, client_with_data):
+        client, key, name = client_with_data
+        client.post("/api/draft/start", json={"slot": 7, "draft_id": "ctl"})
+        # Pick 1.01 is slot 1, not ours — but we say it is ours explicitly.
+        response = client.post(
+            "/api/pick", json={"player_key": key, "draft_id": "ctl", "mine": True}
+        )
+        assert response.status_code == 200
+        assert response.json()["recorded"]["was_ours"] is True
+
+    def test_theirs_flag_keeps_the_player_off_my_roster(self, client_with_data):
+        client, key, _ = client_with_data
+        # Slot 1 so that pick 1.01 would otherwise be inferred as ours.
+        client.post("/api/draft/start", json={"slot": 1, "draft_id": "ctl2"})
+        response = client.post(
+            "/api/pick", json={"player_key": key, "draft_id": "ctl2", "mine": False}
+        )
+        assert response.status_code == 200
+        assert response.json()["recorded"]["was_ours"] is False
+
+    def test_ownership_is_still_inferred_when_unspecified(self, client_with_data):
+        client, key, _ = client_with_data
+        client.post("/api/draft/start", json={"slot": 1, "draft_id": "ctl3"})
+        response = client.post("/api/pick", json={"player_key": key, "draft_id": "ctl3"})
+        assert response.json()["recorded"]["was_ours"] is True

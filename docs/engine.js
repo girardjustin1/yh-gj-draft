@@ -297,7 +297,44 @@ const Engine = (() => {
     return total;
   }
 
-  return {OFFENSE, FLEX_ELIGIBILITY, forward, roundFor, slotFor, pickNumber, label,
+  /* ---- team strength: service.PickAnalysis.team_strength ----
+     Strength only means something relative to someone. Measured against the other
+     teams in this draft, whose rosters we hold, rather than an abstract ideal. */
+  function teamStrength(L, picks, mySlot, board, losses, unfilled){
+    const vbd={}, pos={};
+    for(const p of board){ vbd[p.player_key]=p.vbd??0; pos[p.player_key]=p.position; }
+    const totals={};              // teamKey -> {position: summed vbd}
+    picks.forEach((pick,i)=>{
+      const owner = pick.mine ? "me" : `s${slotFor(i+1,L)}`;
+      const position = pos[pick.k]; if(!position) return;
+      (totals[owner]=totals[owner]||{});
+      totals[owner][position]=(totals[owner][position]||0)+(vbd[pick.k]||0);
+    });
+    const counts={};
+    for(const pick of picks) if(pick.mine){ const q=pos[pick.k]; if(q) counts[q]=(counts[q]||0)+1; }
+
+    const rows=[];
+    for(const position of OFFENSE){
+      const mine = (totals["me"]||{})[position]||0;
+      const others = Object.entries(totals).filter(([k])=>k!=="me")
+        .map(([,t])=>t[position]||0).sort((a,b)=>a-b);
+      const below = others.filter(v=>v<mine).length;
+      const percentile = others.length ? below/others.length*100 : 50;
+      const open = unfilled.includes(position) || unfilled.includes("FLEX");
+      const drain = Math.min(1,(losses[position]||0)/4);
+      rows.push({position, my_value:mine,
+        league_median: others.length?others[Math.floor(others.length/2)]:0,
+        percentile:Math.round(percentile), rank:others.length+1-below,
+        teams:others.length+1, have:counts[position]||0, slot_open:open,
+        expected_gone_before_next_pick:+(losses[position]||0).toFixed(1),
+        priority: Math.round(Math.min(100,Math.max(0,
+          0.45*(100-percentile)+0.35*(open?100:25)+0.20*drain*100)))});
+    }
+    rows.sort((a,b)=>b.priority-a.priority);
+    return {positions:rows, top_priority:rows.length?rows[0].position:null};
+  }
+
+  return {OFFENSE, FLEX_ELIGIBILITY, teamStrength, forward, roundFor, slotFor, pickNumber, label,
     picksForSlot, slotsBetween, adpSurvival, normCdf, unfilledStarters, marketPrior,
     positionProbabilities, opponentNeeds, survivalProbabilities, simulate, bestLineup};
 })();

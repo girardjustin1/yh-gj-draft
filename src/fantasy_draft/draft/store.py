@@ -93,12 +93,18 @@ def record_pick(
     player_name: str | None = None,
     position: str | None = None,
     nfl_team: str | None = None,
+    mine: bool | None = None,
 ) -> DraftState:
     """Append one selection to a stored draft by hand.
 
     The fallback for any platform we cannot read live — Yahoo today, a league drafting in
     a room, or an API outage mid-draft. The engine cannot tell the difference: a manually
     entered pick produces exactly the same ``DraftState`` a synced one does.
+
+    ``mine`` says whose pick this was. Left as None it is inferred from the snake, which
+    is right whenever every pick has been entered in order. Passing it explicitly makes
+    your own roster correct even if the order slipped — and your roster is the input that
+    drives what you still need, so it is the one worth being certain about.
     """
     overall = state.picks_made + 1
     if overall > state.board.total_picks:
@@ -109,11 +115,21 @@ def record_pick(
         raise ValueError(f"{player_name or player_key} has already been drafted.")
 
     slot = state.board.slot_for(overall)
+    inferred_team = state.slot_to_team.get(slot, f"slot-{slot:02d}")
+    if mine is True:
+        team_id = state.my_team_id or inferred_team
+    elif mine is False and state.my_team_id and inferred_team == state.my_team_id:
+        # Explicitly not ours, but the snake says it is our turn — the order has drifted.
+        # Park it on a neutral team so it never lands in our roster.
+        team_id = f"slot-{slot:02d}-other"
+    else:
+        team_id = inferred_team
+
     pick = DraftPick(
         overall=overall,
         round=state.board.round_for(overall),
         slot=slot,
-        team_id=state.slot_to_team.get(slot, f"slot-{slot:02d}"),
+        team_id=team_id,
         player_key=player_key,
         player_name=player_name,
         position=position,

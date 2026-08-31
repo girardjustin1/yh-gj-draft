@@ -159,6 +159,92 @@ select{background:var(--panel-2);color:var(--text);border:1px solid var(--line);
 .neednum .u{font-size:14px;font-weight:750}
 .neednum .g{font-size:10px;color:var(--dim)}
 
+/* ---------- how it works ---------- */
+.how{margin:0;padding-left:20px;font-size:13px;line-height:1.65;color:#c5d2de}
+.how li{margin-bottom:6px}
+.btn-mine,.btn-gone{display:inline-block;padding:1px 7px;border-radius:6px;
+  font-size:10.5px;font-weight:800;letter-spacing:.3px;vertical-align:1px}
+.btn-mine{background:var(--good);color:#06170c}
+.btn-gone{background:var(--panel-2);border:1px solid var(--line-2);color:var(--dim)}
+
+/* ---------- search ---------- */
+.searchbar{display:flex;gap:7px;padding:10px 11px 0}
+#searchBox{flex:1;min-width:0;background:var(--panel-2);border:1px solid var(--line);
+  border-radius:10px;padding:10px 12px;color:var(--text);font-size:15px;
+  -webkit-appearance:none}
+#searchBox:focus{outline:none;border-color:var(--accent)}
+#searchBox::placeholder{color:var(--dimmer)}
+
+/* ---------- two-button pick recording ---------- */
+.pactions{display:flex;gap:6px;flex:none}
+.pbtn{padding:8px 11px;border-radius:9px;font-size:11px;font-weight:800;letter-spacing:.3px;
+  border:1px solid var(--line);background:var(--panel-2);color:var(--dim);white-space:nowrap}
+.pbtn.mine{background:var(--good);border-color:var(--good);color:#06170c}
+.pbtn:active{transform:scale(.94)}
+.pinner{grid-template-columns:1fr auto auto auto}
+
+/* ---------- draft button + taken swipe ---------- */
+.pinner{grid-template-columns:auto 1fr auto auto}
+.draftbtn{padding:9px 12px;border-radius:9px;background:var(--accent);color:#06121f;
+  font-size:11px;font-weight:850;letter-spacing:.4px;flex:none}
+.draftbtn:active{transform:scale(.93)}
+.swipehint{background:linear-gradient(90deg,transparent 20%,var(--bad));
+  color:#fff;font-weight:850;letter-spacing:1px;font-size:13px;opacity:0}
+.prow.armed .swipehint{opacity:1}
+
+/* ---------- suggested picks ---------- */
+.sugg{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;
+  padding:10px 11px;border-radius:11px;background:var(--panel-2);
+  border:1px solid var(--line);margin-bottom:7px}
+.sugg.top{border-color:#2f6b3f;background:#152218}
+.suggname{font-size:16px;font-weight:750;letter-spacing:-.2px}
+.suggmeta{font-size:11px;color:var(--dim);margin-top:3px;display:flex;gap:6px;align-items:center}
+
+/* ---------- my team ---------- */
+.teamslot{display:grid;grid-template-columns:46px 1fr auto;gap:10px;align-items:center;
+  padding:9px 10px;border-bottom:1px solid #1c232c}
+.teamslot .lbl{font-size:11px;font-weight:850;text-align:center;padding:4px 0;
+  border-radius:6px;color:#08121c}
+.teamslot.empty .who{color:var(--dimmer);font-style:italic;font-size:13px}
+.undraft{padding:6px 10px;border-radius:8px;border:1px solid var(--line-2);
+  background:transparent;color:var(--dim);font-size:11px;font-weight:700}
+
+/* ---------- draft button + taken swipe ---------- */
+.pinner{grid-template-columns:auto 1fr auto auto}
+.draftbtn{padding:9px 12px;border-radius:9px;background:var(--accent);color:#06121f;
+  font-size:11px;font-weight:850;letter-spacing:.4px;flex:none}
+.draftbtn:active{transform:scale(.93)}
+.swipehint{background:linear-gradient(90deg,transparent 20%,var(--bad));
+  color:#fff;font-weight:850;letter-spacing:1px;font-size:13px;opacity:0}
+.prow.armed .swipehint{opacity:1}
+
+/* ---------- suggested picks ---------- */
+.sugg{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;
+  padding:10px 11px;border-radius:11px;background:var(--panel-2);
+  border:1px solid var(--line);margin-bottom:7px}
+.sugg.top{border-color:#2f6b3f;background:#152218}
+.suggname{font-size:16px;font-weight:750;letter-spacing:-.2px}
+.suggmeta{font-size:11px;color:var(--dim);margin-top:3px;display:flex;gap:6px;align-items:center}
+
+/* ---------- my team ---------- */
+.teamslot{display:grid;grid-template-columns:46px 1fr auto;gap:10px;align-items:center;
+  padding:9px 10px;border-bottom:1px solid #1c232c}
+.teamslot .lbl{font-size:11px;font-weight:850;text-align:center;padding:4px 0;
+  border-radius:6px;color:#08121c}
+.teamslot.empty .who{color:var(--dimmer);font-style:italic;font-size:13px}
+.undraft{padding:6px 10px;border-radius:8px;border:1px solid var(--line-2);
+  background:transparent;color:var(--dim);font-size:11px;font-weight:700}
+
+/* ---------- team strength ---------- */
+.strow{display:grid;grid-template-columns:34px 1fr 74px;gap:9px;align-items:center;
+  margin-bottom:8px}
+.sttrack{height:20px;border-radius:7px;background:var(--panel-2);overflow:hidden;position:relative}
+.sttrack>span{display:block;height:100%;border-radius:7px;transition:width .35s ease}
+.sttrack .med{position:absolute;top:0;bottom:0;width:2px;background:var(--dimmer);opacity:.9}
+.stmeta{font-family:var(--mono);font-size:11px;color:var(--dim);text-align:right;line-height:1.3}
+.stmeta b{font-family:var(--sans);font-size:11px}
+.prio{display:inline-block;padding:1px 6px;border-radius:5px;font-size:10px;font-weight:800}
+
 /* ---------- 3. roster ---------- */
 .slot{display:grid;grid-template-columns:48px 1fr;gap:9px;align-items:center;
   padding:8px 10px;border-radius:9px;margin-bottom:5px;background:var(--panel-2)}
@@ -224,6 +310,20 @@ select{background:var(--panel-2);color:var(--text);border:1px solid var(--line);
 <div class="wrap">
   <div id="alerts"></div>
 
+  <section class="card" id="howCard">
+    <h2>How this works</h2>
+    <div class="body">
+      <ol class="how">
+        <li><b>Set your draft slot</b> — the button in the recommendation panel.</li>
+        <li><b>Record every pick as it happens</b>, including other managers&#39;. Search for
+          the player, then tap <span class="btn-mine">MINE</span> if you took him or
+          <span class="btn-gone">GONE</span> if someone else did. That is how the app
+          knows who is left.</li>
+        <li><b>When it is your turn</b>, the top panel tells you who to take and why.</li>
+      </ol>
+    </div>
+  </section>
+
   <div class="grid3">
     <section class="card hero">
       <h2><span class="n">1</span> On the clock</h2>
@@ -237,6 +337,11 @@ select{background:var(--panel-2);color:var(--text);border:1px solid var(--line);
       <div class="body" id="vorBody"><div class="empty">—</div></div>
     </section>
   </div>
+
+  <section class="card" id="strengthCard">
+    <h2>Team strength by position</h2>
+    <div class="body" id="strengthBody"><div class="empty">—</div></div>
+  </section>
 
   <section class="card" id="needsCard">
     <h2>What you still need</h2>
@@ -258,6 +363,11 @@ select{background:var(--panel-2);color:var(--text);border:1px solid var(--line);
   <section class="card">
     <h2><span class="n">2</span> Best available</h2>
     <div class="tabs" id="tabs"></div>
+    <div class="searchbar">
+      <input id="searchBox" type="search" placeholder="Search a player to record their pick…"
+             autocomplete="off" autocapitalize="off" spellcheck="false">
+      <button id="clearSearch" class="pillbtn" hidden>clear</button>
+    </div>
     <div class="filters" id="posFilters"></div>
     <div class="sortbar">
       <select id="sortSel">
@@ -300,7 +410,7 @@ select{background:var(--panel-2);color:var(--text);border:1px solid var(--line);
 "use strict";
 const $ = (id) => document.getElementById(id);
 const POSITIONS = ["ALL","QB","RB","WR","TE"];
-const TABS = [["available","Available"],["roster","My team"],["gone","Drafted"]];
+const TABS = [["available","Available"],["roster","My team"],["gone","Taken"]];
 let LATEST=null, POS="ALL", SORT="draft_now", TAB="available", SELECTED=new Set(), BUSY=false;
 
 const fmt=(v,d=1)=>(v==null)?"–":Number(v).toFixed(d);
@@ -352,25 +462,28 @@ const Offline = (() => {
   /* Draft state for the static build. Picks are kept in ORDER, not as a set, because
      opponent rosters are reconstructed from pick order exactly as DraftState.rosters()
      does — that is what makes the ported survival model agree with the Python one. */
-  let DATA=null, order=[], slot=null, sim=null;
-  const KEY="ffdraft.v2";
+  let DATA=null, picks=[], slot=null, sim=null;
+  const KEY="ffdraft.v3";
 
-  const save=()=>{ try{ localStorage.setItem(KEY, JSON.stringify({order,slot})); }catch{} };
+  const save=()=>{ try{ localStorage.setItem(KEY, JSON.stringify({picks,slot})); }catch{} };
   const load=()=>{ try{
     const v=JSON.parse(localStorage.getItem(KEY)||"{}");
-    order=v.order||[]; slot=v.slot??null;
+    picks=v.picks||[]; slot=v.slot??null;
   }catch{} };
 
   const L=()=>DATA.league;
   const byKey=(k)=>DATA.players.find(p=>p.player_key===k);
-  const draftedSet=()=>new Set(order);
-  const myKeys=()=>order.filter((_,i)=>Engine.slotFor(i+1,L())===slot);
+  const draftedSet=()=>new Set(picks.map(p=>p.k));
+  /* Ownership is explicit, not inferred. If the order slips, your roster is still
+     right — and your roster is what drives everything you are told you need. */
+  const myKeys=()=>picks.filter(p=>p.mine).map(p=>p.k);
 
   function analyse(){
     const league=L();
     const drafted=draftedSet();
+    const order=picks.map(p=>p.k);
     const available=DATA.players.filter(p=>!drafted.has(p.player_key));
-    const currentPick=Math.min(order.length+1, league.teams*league.rounds);
+    const currentPick=Math.min(picks.length+1, league.teams*league.rounds);
     const ours=slot?Engine.picksForSlot(slot,league):[];
     const myCurrent=ours.find(p=>p>=currentPick)??null;
     const myNext=myCurrent!=null?(ours.find(p=>p>myCurrent)??null):null;
@@ -404,7 +517,9 @@ const Offline = (() => {
         draft_now:(p.player_score??0)*0.7+((gone==null?0.5:gone)*100)*0.3};
     }).sort((x,y)=>y.draft_now-x.draft_now);
 
-    return {picksMade:order.length,currentPick,myCurrent,myNext,untilNext,pool,needs,
+    const unfilled=[];
+    return {picksMade:picks.length,currentPick,myCurrent,myNext,untilNext,pool,needs,
+      picks,
       losses:sim?sim.losses:analytic.losses, twoPick:sim?sim.twoPick:{},
       iterations:sim?sim.iterations:0,
       pickLabel:Engine.label(myCurrent??currentPick, league)};
@@ -421,15 +536,38 @@ const Offline = (() => {
     data:()=>DATA, analyse, byKey,
     label:(o)=>Engine.label(o,L()),
     get slot(){return slot;}, set slot(v){slot=v;save();},
-    isDrafted:(k)=>order.includes(k),
-    markGone(k){ if(!order.includes(k)){order.push(k);save();} },
-    undo(){ const k=order.pop(); save(); return k; },
-    reset(){ order=[]; save(); },
-    myKeys, count:()=>order.length,
+    isDrafted:(k)=>picks.some(p=>p.k===k),
+    record(k, mine){ if(!picks.some(p=>p.k===k)){ picks.push({k,mine:!!mine}); save(); } },
+    undo(){ const p=picks.pop(); save(); return p?p.k:null; },
+    remove(k){ const i=picks.findIndex(p=>p.k===k); if(i<0) return null;
+      const [p]=picks.splice(i,1); save(); return p.k; },
+    reset(){ picks=[]; save(); },
+    picks:()=>picks, myKeys, count:()=>picks.length,
+    /* Whose turn the snake says it is — shown, never silently applied. */
+    turnIsMine(){ return slot!=null && Engine.slotFor(picks.length+1, L())===slot; },
   };
 })();
 
 let MODE="live";   // "live" = local engine via /api, "offline" = baked board.json
+let QUERY="";      // live player search
+
+/* Accent- and punctuation-insensitive, so "jamarr" finds Ja'Marr and "tj" finds T.J.
+   Mirrors normalization/players.py closely enough for a search box. */
+function searchKey(text){
+  return String(text||"").toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g,"")
+    .replace(/['`’.]/g,"").replace(/[^a-z0-9]+/g," ").trim();
+}
+function matchesQuery(player){
+  if(!QUERY) return true;
+  const q=searchKey(QUERY);
+  if(!q) return true;
+  const name=searchKey(player.name);
+  const initials=name.split(" ").map(w=>w[0]).join("");
+  return name.includes(q) || name.split(" ").some(w=>w.startsWith(q))
+    || initials.startsWith(q) || searchKey(player.team)===q
+    || searchKey(player.position)===q;
+}
 
 /* ---------- offline rendering ---------- */
 function renderOfflineBanner(d){
@@ -476,6 +614,15 @@ function renderOffline(){
     <div class="reason">Best available weighted by how likely each player is to be gone by
       <b>${a.myNext?esc(Offline.label(a.myNext)):"your next pick"}</b>, using the roster
       needs of the ${a.needs.length} managers picking in between.</div>
+    <div class="muted" style="margin:14px 0 7px;text-transform:uppercase;letter-spacing:.7px;font-size:10.5px">Suggested picks</div>
+    ${[top, ...a.pool.slice(1,3)].map((r,i)=>`
+      <div class="sugg ${i===0?"top":""}">
+        <div><div class="suggname">${esc(r.name)}</div>
+          <div class="suggmeta"><span class="posdot ${posClass(r.position)}">${esc(r.position)}</span>
+            ${esc(r.team??"")} ${r.bye_week?`BYE ${r.bye_week}`:""} ·
+            <span style="color:${urgency(r.probability_gone)}">${pct(r.probability_gone)} gone</span></div></div>
+        <button class="draftbtn" data-draft="${esc(r.player_key)}" data-n="${esc(r.name)}">DRAFT</button>
+      </div>`).join("")}
     <div class="altrow">
       <button class="altchip" onclick="offlineSetSlot()">Slot: <b>${Offline.slot}</b> — change</button>
       <button class="altchip" onclick="const k=Offline.undo();toast(k?'Undid last pick':'Nothing to undo');renderOffline();">Undo last</button>
@@ -510,6 +657,7 @@ function renderOffline(){
       `<div class="muted" style="margin-top:9px">This pick plus the best player expected to
        survive to your next one, over ${a.iterations.toLocaleString()} simulations.</div>`;
 
+  renderOfflineStrength(a);
   renderOfflineNeeds(a);
 
   /* 2 — board */
@@ -546,6 +694,15 @@ function renderOffline(){
   $("needsCard").hidden=false;
 }
 
+/* ---------- team strength, offline ---------- */
+function renderOfflineStrength(a){
+  const d=Offline.data();
+  const unfilled=[];
+  const ts=Engine.teamStrength(d.league, Offline.picks(), Offline.slot,
+    d.players, a.losses||{}, unfilled);
+  renderStrength({team_strength:ts});
+}
+
 function renderOfflineNeeds(a){
   const d=Offline.data();
   const seen=new Set(); const rows=[];
@@ -572,54 +729,105 @@ function renderOfflineNeeds(a){
      lineup — a fourth back scores low once RB and FLEX are full.</div>`;
 }
 
+/* ---------- MY TEAM: the starting lineup, slot by slot ---------- */
+function renderMyTeam(){
+  const d=Offline.data(), L=d.league;
+  const mine=Offline.myKeys().map(k=>d.players.find(p=>p.player_key===k)).filter(Boolean);
+  const elig=(sl)=>L.flex_eligibility[sl]||[sl];
+  const slots=L.lineup_slots.filter(sl=>sl!=="K"&&sl!=="DST");
+  const ded=slots.map((sl,i)=>[sl,i]).filter(([sl])=>!L.flex_eligibility[sl]);
+  const flx=slots.map((sl,i)=>[sl,i]).filter(([sl])=>L.flex_eligibility[sl]);
+  const used=new Set(), assign={};
+  for(const [sl,i] of [...ded,...flx]){
+    const idx=mine.findIndex((pl,j)=>!used.has(j)&&elig(sl).includes(pl.position));
+    if(idx>=0){ used.add(idx); assign[i]=mine[idx]; }
+  }
+  const bench=mine.filter((_,j)=>!used.has(j));
+  $("plist").innerHTML = slots.map((sl,i)=>{
+    const pl=assign[i];
+    const flex=!!L.flex_eligibility[sl];
+    return `<li class="teamslot ${pl?"":"empty"}">
+      <div class="lbl ${flex?"":posClass(sl)}" style="${flex?"background:var(--dimmer)":""}">${esc(sl)}</div>
+      <div class="who">${pl?`<b>${esc(pl.name)}</b> <span class="muted">${esc(pl.position)} ${esc(pl.team??"")}</span>`:"—"}</div>
+      ${pl?`<button class="undraft" data-undraft="${esc(pl.player_key)}">Undraft</button>`:"<div></div>"}
+    </li>`;}).join("")
+    + (bench.length?`<li class="teamslot"><div class="lbl" style="background:var(--dimmer)">BN</div>
+        <div class="who muted">${bench.map(b=>esc(b.name)).join(", ")}</div><div></div></li>`:"");
+  $("listHint").textContent="";
+  wireUndraft();
+}
+
+function wireUndraft(){
+  $("plist").querySelectorAll("[data-undraft]").forEach(b=>b.onclick=()=>{
+    Offline.remove(b.dataset.undraft); toast("Removed"); renderOffline();
+  });
+}
+
+/* ---------- one player row ----------
+   Two controls, matching how a draft actually goes: the blue button is "I took him",
+   swiping the row away is "someone else did". Nothing is inferred. */
+function playerRow(r){
+  const gone = r.probability_gone;
+  return `<li class="prow" data-key="${esc(r.player_key)}" data-name="${esc(r.name)}">
+    <div class="swipehint">TAKEN</div>
+    <div class="pinner">
+      <button class="draftbtn" data-act="draft">DRAFT</button>
+      <div class="pmain">
+        <div class="pname">${esc(r.name)}</div>
+        <div class="pmeta">
+          <span class="posdot ${posClass(r.position)}">${esc(r.position)}</span>
+          <span>${esc(r.team??"")}</span>${r.bye_week?`<span>(${r.bye_week})</span>`:""}
+          ${r.tier?`<span>T${r.tier}</span>`:""}
+          <span>${fmt(r.floor,0)}–${fmt(r.ceiling,0)}</span>
+          ${r.lineup_upgrade!=null?`<span>+${fmt(r.lineup_upgrade,0)}</span>`:""}
+        </div>
+      </div>
+      <div class="pnums"><div class="a">${fmt(r.draft_now ?? r.player_score)}</div>
+        <div class="b">ADP ${fmt(r.adp,1)}</div></div>
+      <div class="gonebadge" style="color:${urgency(gone)}">${pct(gone)}</div>
+    </div>
+  </li>`;
+}
+
 function renderOfflineList(a){
   let rows=a.pool.slice();
   if(POS!=="ALL") rows=rows.filter(r=>r.position===POS);
+  if(QUERY) rows=rows.filter(matchesQuery);
   const key = SORT==="draft_now" ? "offline_priority" : SORT;
   const asc=(SORT==="adp");
   rows.sort((x,y)=>{ const p=x[key]??-Infinity,q=y[key]??-Infinity; return asc?p-q:q-p; });
 
-  if(TAB==="roster"){
-    const mineRows=Offline.myKeys().map(k=>Offline.data().players.find(p=>p.player_key===k)).filter(Boolean);
-    $("plist").innerHTML=mineRows.length?mineRows.map(r=>`<li class="prow"><div class="pinner">
-      <div class="pmain"><div class="pname">${esc(r.name)}</div>
-      <div class="pmeta"><span class="posdot ${posClass(r.position)}">${esc(r.position)}</span> ${esc(r.team??"")}</div></div>
-      <div class="pnums"><div class="a">${fmt(r.player_score)}</div><div class="b">VBD ${fmt(r.vbd,0)}</div></div>
-      <div></div></div></li>`).join(""):`<li class="empty">Tap ✓ on a player to add them to your team.</li>`;
-    $("listHint").textContent=""; return;
-  }
+  if(TAB==="roster"){ renderMyTeam(); return; }
   if(TAB==="gone"){
-    $("plist").innerHTML=`<li class="empty">${Offline.count()} players marked off the board.</li>`;
-    return;
+    const d=Offline.data();
+    const taken=Offline.picks().map((p,i)=>({...d.players.find(x=>x.player_key===p.k),
+      mine:p.mine, overall:i+1})).filter(x=>x.player_key).reverse();
+    $("plist").innerHTML = taken.length ? taken.map(r=>`
+      <li class="prow"><div class="pinner" style="grid-template-columns:52px 1fr auto">
+        <div class="lbl" style="font-family:var(--mono);font-size:11px;color:var(--dim)">${Offline.label(r.overall)}</div>
+        <div class="pmain"><div class="pname">${esc(r.name)}${r.mine?' <span class="btn-mine">MINE</span>':""}</div>
+          <div class="pmeta"><span class="posdot ${posClass(r.position)}">${esc(r.position)}</span> ${esc(r.team??"")}</div></div>
+        <button class="undraft" data-undraft="${esc(r.player_key)}">Undo</button>
+      </div></li>`).join("") : `<li class="empty">No picks recorded yet.</li>`;
+    $("listHint").textContent="";
+    wireUndraft(); return;
   }
 
-  $("plist").innerHTML=rows.slice(0,140).map(r=>`
-    <li class="prow" data-key="${esc(r.player_key)}" data-name="${esc(r.name)}">
-      <div class="swipehint">mark drafted</div>
-      <div class="pinner">
-        <div class="pmain">
-          <div class="pname">${esc(r.name)}</div>
-          <div class="pmeta">
-            <span class="posdot ${posClass(r.position)}">${esc(r.position)}</span>
-            <span>${esc(r.team??"")}</span>${r.bye_week?`<span>bye ${r.bye_week}</span>`:""}
-            ${r.tier?`<span>T${r.tier}</span>`:""}
-            <span>${fmt(r.floor,0)}–${fmt(r.ceiling,0)}</span>
-            ${r.lineup_upgrade!=null?`<span>+${fmt(r.lineup_upgrade,0)} lineup</span>`:""}
-          </div>
-        </div>
-        <div class="pnums"><div class="a">${fmt(r.player_score)}</div>
-          <div class="b">ADP ${fmt(r.adp,1)}</div></div>
-        <div class="gonebadge" style="color:${urgency(r.probability_gone)}">${pct(r.probability_gone)}</div>
-      </div>
-    </li>`).join("")||`<li class="empty">Nothing at this position.</li>`;
-
-  $("listHint").innerHTML="Tap or swipe a player to record the pick, in draft order. "+
-    "Whose pick it is follows from the snake, so your roster fills itself.";
-  attachOfflineSwipe();
+  $("plist").innerHTML = rows.slice(0,140).map(playerRow).join("")
+    || `<li class="empty">Nothing matches.</li>`;
+  $("listHint").innerHTML =
+    `<span class="btn-mine">DRAFT</span> = you took him &nbsp;·&nbsp; <b>swipe the row left</b> = someone else did`;
+  attachRowActions();
 }
 
-function attachOfflineSwipe(){
+function attachRowActions(){
   $("plist").querySelectorAll(".prow[data-key]").forEach(row=>{
+    row.querySelector("[data-act=draft]").onclick=(e)=>{
+      e.stopPropagation();
+      Offline.record(row.dataset.key, true);
+      toast(`${row.dataset.name} — added to your team`);
+      renderOffline();
+    };
     const inner=row.querySelector(".pinner");
     let x0=null,y0=null,dx=0,locked=null;
     inner.addEventListener("touchstart",e=>{
@@ -634,21 +842,14 @@ function attachOfflineSwipe(){
       row.classList.toggle("armed",dx<-70);},{passive:true});
     inner.addEventListener("touchend",()=>{
       inner.style.transition="";
-      if(locked==="x"&&dx<-70){ Offline.markGone(row.dataset.key);
-        toast(`${row.dataset.name} recorded`); renderOffline(); }
+      if(locked==="x"&&dx<-70){ Offline.record(row.dataset.key,false);
+        toast(`${row.dataset.name} — taken`); renderOffline(); }
       inner.style.transform=""; row.classList.remove("armed"); x0=null;});
-    /* One action only: record the pick. Whose it is follows from snake order, exactly
-       as `ff draft pick` does, so offline and live agree on who owns what. */
-    const record=()=>{
-      const a=Offline.analyse();
-      const mine=Engine.slotFor(Offline.count()+1, Offline.data().league)===Offline.slot;
-      Offline.markGone(row.dataset.key);
-      toast(`${row.dataset.name}${mine?" — yours":""}`);
-      renderOffline();
-      void a;
+    /* Desktop, where there is no swipe: the badge marks him taken by someone else. */
+    row.querySelector(".gonebadge").onclick=()=>{
+      Offline.record(row.dataset.key,false);
+      toast(`${row.dataset.name} — taken`); renderOffline();
     };
-    row.querySelector(".gonebadge").onclick=record;
-    row.querySelector(".pname").onclick=record;
   });
 }
 
@@ -695,10 +896,15 @@ function renderClock(d){
     ${o.alternatives.length?`<div class="altrow">${o.alternatives.map(a=>
       `<span class="altchip"><span class="posdot ${posClass(a.position)}">${esc(a.position)}</span>
        ${esc(a.name)} <b>${fmt(a.draft_now)}</b></span>`).join("")}</div>`:""}`;
-  $("moreBtn").onclick=(e)=>{
+  $("clockBody").querySelectorAll("[data-draft]").forEach(b=>b.onclick=()=>{
+    if(MODE!=="offline") return;
+    Offline.record(b.dataset.draft,true); toast(`${b.dataset.n} — added to your team`);
+    renderOffline();
+  });
+  $("moreBtn")&&($("moreBtn").onclick=(e)=>{
     const t=$("reasonText"); const c=t.classList.toggle("collapsed");
     e.target.textContent=c?"Why? ▾":"Less ▴";
-  };
+  });
 }
 
 /* ---------- positional value bars ---------- */
@@ -719,6 +925,36 @@ function renderVor(d){
     }).join("")}
     <div class="muted" style="margin-top:8px">Bar length is positional scarcity right now;
     the number is how many are expected to go before your next pick.</div>`;
+}
+
+/* ---------- team strength ---------- */
+function renderStrength(d){
+  const ts=d.team_strength;
+  if(!ts||!ts.positions.length){ $("strengthBody").innerHTML=`<div class="empty">—</div>`; return; }
+  const maxV=Math.max(1,...ts.positions.map(p=>Math.max(p.my_value,p.league_median)));
+  $("strengthBody").innerHTML=
+    `<div class="muted" style="margin-bottom:10px">Your value at each position against the
+      other ${ts.positions[0].teams-1} teams in this draft. The grey line is the league median.</div>`
+    + ts.positions.map(p=>{
+      const w=Math.max(2,Math.round(100*p.my_value/maxV));
+      const med=Math.max(0,Math.min(100,Math.round(100*p.league_median/maxV)));
+      const col = p.percentile>=66?"var(--good)":(p.percentile>=33?"var(--warn)":"var(--bad)");
+      const prioCol = p.priority>=70?"var(--bad)":(p.priority>=45?"var(--warn)":"var(--dimmer)");
+      return `<div class="strow">
+        <div class="vorlabel ${posClass(p.position)}">${p.position}</div>
+        <div class="sttrack"><span style="width:${w}%;background:${col}"></span>
+          <i class="med" style="left:${med}%"></i></div>
+        <div class="stmeta"><b style="color:${col}">${p.rank} of ${p.teams}</b><br>
+          ${p.have} rostered</div>
+      </div>`;}).join("")
+    + `<div class="muted" style="margin-top:10px">Draft next, by priority: `
+    + ts.positions.map(p=>{
+        const c = p.priority>=70?"var(--bad)":(p.priority>=45?"var(--warn)":"var(--dimmer)");
+        return `<span class="prio" style="background:${c};color:#06121f">${p.position} ${p.priority}</span>`;
+      }).join(" ")
+    + `</div><div class="muted" style="margin-top:6px">Priority combines being weak there,
+       still needing the slot, and the position drying up before your next pick. It is a
+       readout — the recommendation above is still value-driven.</div>`;
 }
 
 /* ---------- what you still need ---------- */
@@ -939,7 +1175,8 @@ async function onClock(showBusy=true){
   try{
     const d=await api("/api/on-clock",{refresh:true,simulate:true,limit:140});
     LATEST=d;
-    renderClock(d); renderVor(d); renderNeeds(d); renderSurvival(d); renderWhatIf(d);
+    renderClock(d); renderVor(d); renderStrength(d); renderNeeds(d);
+    renderSurvival(d); renderWhatIf(d);
     renderList(); renderRoster(d); renderEnv(d);
     if(d.sync_error) alert_(`Live sync did not run — using the stored board. <span class="muted">${esc(d.sync_error)}</span>`);
   }catch(e){
@@ -957,7 +1194,18 @@ $("undoBtn").onclick=async()=>{
     if(d.removed) await onClock(false);
   }catch(e){ toast(e.message.slice(0,90)); }
 };
-$("sortSel").onchange=e=>{SORT=e.target.value;MODE==="live"?renderList():renderOffline();};
+$("sortSel").onchange=e=>{SORT=e.target.value;redrawList();};
+
+function redrawList(){ MODE==="live"?renderList():renderOffline(); }
+let searchTimer=null;
+$("searchBox").addEventListener("input",(e)=>{
+  QUERY=e.target.value;
+  $("clearSearch").hidden = !QUERY;
+  // Debounced: retyping should not re-run the simulation on every keystroke.
+  clearTimeout(searchTimer);
+  searchTimer=setTimeout(()=>{ if(TAB!=="available"){TAB="available";renderTabs();} redrawList(); }, 90);
+});
+$("clearSearch").onclick=()=>{ QUERY=""; $("searchBox").value=""; $("clearSearch").hidden=true; redrawList(); };
 
 /* ---------- mode detection ----------
    Try the local engine first. If there is no /api (static hosting), fall back to the
