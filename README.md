@@ -1,1 +1,137 @@
-# yh-gj-draft
+# Fantasy Draft AI
+
+A **local-first** 2026 NFL fantasy-football snake-draft decision engine.
+
+Not a rankings viewer. It answers one question well:
+
+> *I am on the clock. Given who's gone, my roster, the other rosters, my next snake pick,
+> ADP, projections, scarcity, opportunity, schedule, risk, and the probability players
+> survive until my next pick — who should I draft?*
+
+Deterministic Python does the math. Claude explains it.
+
+## Quick start
+
+```bash
+uv venv --python 3.12
+uv pip install -e ".[dev]"
+source .venv/bin/activate
+
+ff doctor          # validate environment + data
+```
+
+See [ROADMAP.md](ROADMAP.md) for build phases and [HUMAN_TODO.md](HUMAN_TODO.md) for
+anything the engine needs from you.
+
+## The thing it does
+
+```
+$ ff on-clock
+
+──────────────────────── ON THE CLOCK ────────────────────────
+League        Home League — 12-team Half-PPR
+Pick          4.06 (overall 42)
+Next pick     5.07 (overall 55) — 12 picks away
+
+Current roster:  WR Amon-Ra St. Brown · WR DeVonta Smith · RB Kenneth Walker III
+
+ Pos   Demand              Run   Value falling to us   Expected gone before our pick
+ QB       27  ███░░░░░░░░░   0                    70                             1.3
+ RB       76  █████████░░░   7                    55                             4.3
+ WR       75  █████████░░░   7                    56                             5.8
+ TE       22  ███░░░░░░░░░   0                   100                             0.6
+
+ #  Player              Pos  Tier  Draft Now  Player  Value    ADP  Gone by next  2-pick EV
+ 1  Kyren Williams      RB     1        74.2    91.5   77.5   41.5          57%      180.6
+ 2  Javonte Williams    RB     1        72.9    90.1   81.7   44.6          46%      179.5
+ 3  Joe Burrow          QB     1        72.4    89.7   71.8   45.8          36%      179.0
+
+──────────────────── TAKE KYREN WILLIAMS ────────────────────
+
+Take Kyren Williams (RB, LAR). He projects 207 points, 101 above RB replacement.
+He is more likely than not gone before our next pick (57%). Across both picks,
+simulated expected value: Kyren Williams 180.6; Javonte Williams 179.5.
+Recommendation confidence: 43%.
+```
+
+## Commands
+
+**Setup**
+
+| Command | Description |
+|---|---|
+| `ff doctor` | Validate environment, config, database, data freshness |
+| `ff config show` / `weights` / `validate` | Inspect league settings and scoring weights |
+| `ff data refresh` | Pull nflverse/FantasyPros data (~290k rows in ~8s) |
+| `ff data status` / `sources` / `unresolved-players` | Freshness, sources, identity failures |
+| `ff db init` / `tables` / `reset` | Database maintenance |
+
+**Analysis**
+
+| Command | Description |
+|---|---|
+| `ff board [--position RB] [--sort value] [--replacement]` | The ranked draft board |
+| `ff players NAME` | Identity, ECR spread, usage, expected-vs-actual points, depth chart |
+| `ff compare A B [C…]` | Side-by-side across every score component |
+| `ff explain NAME` | Every component, its raw value, weight, confidence, and method |
+| `ff import projections FILE` / `ff import list` | Bring your own CSV/Parquet/JSON |
+
+**Drafting**
+
+| Command | Description |
+|---|---|
+| `ff sleeper connect USERNAME` / `leagues` / `use-league ID` / `status` | Link Sleeper (public read-only) |
+| `ff draft sync` / `status [--rosters]` | Sync and inspect the live board |
+| `ff draft mock [--picks N --slot N]` | Practice draft over the real board |
+| **`ff on-clock [--sync] [--json]`** | **The recommendation** |
+| `ff simulate [--iterations N]` | Survival + two-pick EV in detail |
+
+Add `--verbose` or `--debug` to any command for structured logs.
+
+## With Claude
+
+A project skill lives at `.claude/skills/draft/SKILL.md`. In Claude Code, say:
+
+> I'm on the clock.
+
+Claude syncs the draft, runs `ff on-clock --json`, and interprets the result. It is
+instructed never to invent a number the engine can compute.
+
+## How it decides
+
+Three scores, not one opaque number — all weights in `config/scoring_weights.yaml`:
+
+- **Player Score** — how good is he? projection, VBD, opportunity, offensive
+  environment, schedule, risk
+- **Value Score** — what does taking him *here* capture? market/ADP, tier cliff,
+  scarcity, projection-vs-market
+- **Draft Now Score** — what do I take *at this pick*? the two above plus next-pick
+  urgency, tier scarcity, roster fit, draft-room behaviour, strategy fit
+
+Every component reports a **confidence**. When one cannot be computed, its weight is
+redistributed across the components we do have — never scored as a confident-looking
+average. `ff explain` shows this happening.
+
+See [docs/scoring.md](docs/scoring.md) for the methodology and its limitations.
+
+## Layout
+
+```
+config/     league + weights + data-source YAML
+data/       raw / processed / cache / fantasy.duckdb   (gitignored)
+src/fantasy_draft/
+  config.py      Pydantic league + weights models
+  database.py    DuckDB connection + schema
+  data/          source adapters (nflverse, sleeper, adp, projections)
+  analytics/     vbd, tiers, scarcity, opportunity, schedule, risk, market
+  draft/         snake math, draft state, availability, simulator
+  scoring/       player_score, value_score, draft_now
+  recommendation/ ranker + explanation
+tests/
+```
+
+## Privacy
+
+Everything runs on your machine. No telemetry, no uploads, no third-party transmission
+beyond fetching public NFL/fantasy data. Secrets, caches, and the DuckDB file are
+gitignored.

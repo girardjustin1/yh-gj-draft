@@ -35,6 +35,7 @@ from .replacement import (
 )
 from .risk import risk_score
 from .scarcity import PositionScarcity, position_scarcity, scarcity_frame
+from .schedule import attach_schedule, schedule_scores
 from .tiers import assign_tiers, expected_loss_by_waiting
 from .vbd import add_vbd
 
@@ -198,16 +199,14 @@ def build_board(
         )
     board = board.with_columns(pl.col("offense_confidence").fill_null(0.0))
 
-    # --- schedule (Phase 6; absent for now, and honestly reported as such) ---
-    if "schedule_score" not in board.columns:
-        board = board.with_columns(
-            pl.lit(None, dtype=pl.Float64).alias("schedule_score"),
-            pl.lit(0.0).alias("schedule_confidence"),
-            pl.lit(None, dtype=pl.Float64).alias("schedule_raw"),
-        )
+    # --- schedule strength ---
+    schedule = _try(warnings, "Schedule strength", lambda: schedule_scores(db, cfg))
+    board = attach_schedule(board, schedule if schedule is not None else pl.DataFrame())
+    if schedule is not None:
         warnings.append(
-            "Schedule strength is not implemented yet (Phase 6); its 7.5% weight is "
-            "redistributed across the components we do have."
+            "Schedule strength is included at low confidence on purpose. Preseason "
+            "defence-vs-position rests on last year's personnel and is weak evidence, so "
+            "it shifts close calls and nothing more."
         )
 
     # --- bye weeks ---

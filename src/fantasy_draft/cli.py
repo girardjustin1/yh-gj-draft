@@ -447,6 +447,7 @@ def data_refresh(
         # Projections are derived from the rankings we just loaded, so they are stale
         # the moment a refresh lands.
         projection_rows = 0
+        dvp_rows = 0
         if not only or "fantasypros_ecr" in only:
             from .analytics.projections import refresh_derived_projections
 
@@ -455,12 +456,25 @@ def data_refresh(
             except Exception as exc:  # noqa: BLE001
                 console.print(f"[yellow]Could not derive projections: {exc}[/yellow]")
 
+        if not only or "nflverse_player_stats" in only:
+            from .analytics.defense_vs_position import store_defense_vs_position
+
+            try:
+                dvp_rows = store_defense_vs_position(db, cfg)
+            except Exception as exc:  # noqa: BLE001
+                console.print(f"[yellow]Could not compute defense-vs-position: {exc}[/yellow]")
+
         unresolved = db.row_count("unresolved_players")
 
     if projection_rows:
         console.print(
             f"[green]OK[/green] derived {projection_rows:,} projections from the "
             f"consensus board and the historical positional value curve"
+        )
+    if dvp_rows:
+        console.print(
+            f"[green]OK[/green] computed {dvp_rows:,} defence-vs-position scores in your "
+            f"league's scoring rules"
         )
 
     failed = [r.source for r in results if r.status == "failed"]

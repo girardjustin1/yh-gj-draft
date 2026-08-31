@@ -223,15 +223,6 @@ noise (1.5 points), and says so in the explanation when it does.
 
 ---
 
-## ⬜ Phase 7 — Claude interface
-
-- Narrow tool surface: `get_draft_state`, `get_top_recommendations`, `compare_players`,
-  `simulate_until_next_pick`, `recommend_pick`, …
-- Local MCP server (verify the current official SDK before depending on it)
-- `/draft` skill
-
-**Acceptance** — I say "I'm on the clock" and get a live, contextual recommendation.
-
 ---
 
 ## Later, deliberately not now
