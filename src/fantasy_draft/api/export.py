@@ -104,6 +104,9 @@ def export_board(db: Database, cfg: AppConfig, limit: int = 400) -> dict[str, An
             },
             "starters": league.roster.starters,
             "bench": league.roster.bench,
+            # Needed by engine.js to reproduce unfilled_starters() exactly.
+            "dedicated": league.roster.dedicated,
+            "flex_counts": league.roster.flex_counts,
         },
         "replacement": {
             position: {
@@ -124,16 +127,17 @@ def export_board(db: Database, cfg: AppConfig, limit: int = 400) -> dict[str, An
             ],
             "computed_in_browser": [
                 "snake pick maths",
-                "ADP-only survival probability",
+                "opponent roster needs",
+                "roster-aware survival probability",
+                "Monte Carlo simulation",
+                "two-pick expected value",
                 "marginal lineup value",
-                "available pool and roster tracking",
             ],
             "requires_local_engine": [
-                "roster-aware survival probability",
-                "Monte Carlo two-pick expected value",
-                "draft-room behaviour and position runs",
+                "live Sleeper draft sync",
                 "adaptive strategy state",
-                "live Sleeper sync",
+                "draft-room run analysis",
+                "re-scoring after a data refresh",
             ],
         },
     }
@@ -149,8 +153,8 @@ def write_static_site(
     board_path = out_dir / "board.json"
     board_path.write_text(json.dumps(payload, separators=(",", ":")))
 
-    index_source = STATIC_DIR / "index.html"
-    shutil.copyfile(index_source, out_dir / "index.html")
+    for name in ("index.html", "engine.js"):
+        shutil.copyfile(STATIC_DIR / name, out_dir / name)
 
     # Stop Jekyll mangling anything on GitHub Pages.
     (out_dir / ".nojekyll").write_text("")

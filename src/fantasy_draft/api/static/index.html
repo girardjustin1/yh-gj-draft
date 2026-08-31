@@ -294,6 +294,8 @@ select{background:var(--panel-2);color:var(--text);border:1px solid var(--line);
 </div>
 <div class="toast" id="toast"></div>
 
+<script src="engine.js"></script>
+
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
@@ -347,106 +349,65 @@ function alert_(html,cls="note"){ $("alerts").insertAdjacentHTML("beforeend",`<d
    drift from the real one and disagree with it mid-draft. The banner says so.
    ================================================================================== */
 const Offline = (() => {
-  let DATA=null, drafted=new Set(), mine=new Set(), slot=null;
-  const KEY="ffdraft.v1";
+  /* Draft state for the static build. Picks are kept in ORDER, not as a set, because
+     opponent rosters are reconstructed from pick order exactly as DraftState.rosters()
+     does — that is what makes the ported survival model agree with the Python one. */
+  let DATA=null, order=[], slot=null, sim=null;
+  const KEY="ffdraft.v2";
 
-  const save=()=>{ try{ localStorage.setItem(KEY, JSON.stringify(
-    {drafted:[...drafted], mine:[...mine], slot})); }catch{} };
+  const save=()=>{ try{ localStorage.setItem(KEY, JSON.stringify({order,slot})); }catch{} };
   const load=()=>{ try{
     const v=JSON.parse(localStorage.getItem(KEY)||"{}");
-    drafted=new Set(v.drafted||[]); mine=new Set(v.mine||[]); slot=v.slot??null;
+    order=v.order||[]; slot=v.slot??null;
   }catch{} };
 
-  /* --- snake maths: mirrors draft/snake.py --- */
-  const forward=(rd)=>{
-    const L=DATA.league;
-    if(L.draft_type==="linear") return true;
-    const std = rd%2===1;
-    return (L.third_round_reversal && rd>=3) ? !std : std;
-  };
-  const pickNumber=(rd,s)=>{
-    const T=DATA.league.teams;
-    return (rd-1)*T + (forward(rd) ? s : T-s+1);
-  };
-  const roundFor=(overall)=>Math.floor((overall-1)/DATA.league.teams)+1;
-  const slotFor=(overall)=>{
-    const T=DATA.league.teams, rd=roundFor(overall), within=((overall-1)%T)+1;
-    return forward(rd) ? within : T-within+1;
-  };
-  const label=(overall)=>{
-    const T=DATA.league.teams;
-    return `${roundFor(overall)}.${String(((overall-1)%T)+1).padStart(2,"0")}`;
-  };
-  const myPicks=()=>{
-    if(!slot) return [];
-    return Array.from({length:DATA.league.rounds},(_,i)=>pickNumber(i+1,slot));
-  };
-
-  /* --- ADP-only survival: availability.adp_survival --- */
-  const erf=(x)=>{ // Abramowitz & Stegun 7.1.26
-    const sgn=x<0?-1:1; x=Math.abs(x);
-    const t=1/(1+0.3275911*x);
-    const y=1-((((1.061405429*t-1.453152027)*t+1.421413741)*t-0.284496736)*t
-      +0.254829592)*t*Math.exp(-x*x);
-    return sgn*y;
-  };
-  const normCdf=(x)=>0.5*(1+erf(x/Math.SQRT2));
-  const adpSurvival=(adp,sd,nextPick)=>{
-    if(adp==null||nextPick==null) return null;
-    const spread=Math.max(sd||12,1);
-    return Math.min(1,Math.max(0,1-normCdf((nextPick-adp)/spread)));
-  };
-
-  /* --- marginal lineup value: analytics/lineup_value, in VBD --- */
-  const flexOf=(s)=>DATA.league.flex_eligibility[s]||[s];
-  const bestLineup=(players)=>{
-    const slots=DATA.league.lineup_slots;
-    const ded=slots.filter(s=>!DATA.league.flex_eligibility[s]);
-    const flx=slots.filter(s=>DATA.league.flex_eligibility[s]);
-    const pool=[...players].sort((a,b)=>b[1]-a[1]);
-    const used=new Set(); let total=0;
-    for(const s of [...ded,...flx]){
-      const elig=flexOf(s);
-      for(let i=0;i<pool.length;i++){
-        if(used.has(i)||!elig.includes(pool[i][0])) continue;
-        used.add(i); total+=pool[i][1]; break;
-      }
-    }
-    return total;
-  };
-
-  const board=()=>DATA?DATA.players:[];
-  const byKey=(k)=>board().find(p=>p.player_key===k);
-  const available=()=>board().filter(p=>!drafted.has(p.player_key));
-  const myRosterPlayers=()=>[...mine].map(byKey).filter(Boolean)
-    .map(p=>[p.position, p.vbd??0]);
+  const L=()=>DATA.league;
+  const byKey=(k)=>DATA.players.find(p=>p.player_key===k);
+  const draftedSet=()=>new Set(order);
+  const myKeys=()=>order.filter((_,i)=>Engine.slotFor(i+1,L())===slot);
 
   function analyse(){
-    const picksMade=drafted.size;
-    const currentPick=Math.min(picksMade+1, DATA.league.teams*DATA.league.rounds);
-    const ours=myPicks();
+    const league=L();
+    const drafted=draftedSet();
+    const available=DATA.players.filter(p=>!drafted.has(p.player_key));
+    const currentPick=Math.min(order.length+1, league.teams*league.rounds);
+    const ours=slot?Engine.picksForSlot(slot,league):[];
     const myCurrent=ours.find(p=>p>=currentPick)??null;
     const myNext=myCurrent!=null?(ours.find(p=>p>myCurrent)??null):null;
     const untilNext=(myCurrent!=null&&myNext!=null)?myNext-myCurrent-1:null;
 
-    const baseline=bestLineup(myRosterPlayers());
-    const pool=available().map(p=>{
-      const avail=adpSurvival(p.adp,p.adp_sd,myNext);
-      const up=(p.vbd!=null)
-        ? Math.max(0,bestLineup([...myRosterPlayers(),[p.position,p.vbd]])-baseline)
-        : null;
-      return {...p,
-        probability_available:avail,
-        probability_gone:avail==null?null:1-avail,
-        lineup_upgrade:up,
-        /* Offline "draft now" is Player Score tempered by how likely he is to vanish.
-           Named differently in the UI so it is never mistaken for the engine's
-           seven-component Draft Now Score. */
-        offline_priority:(p.player_score??0)*0.75+((avail==null?0.5:1-avail)*100)*0.25};
-    }).sort((a,b)=>b.offline_priority-a.offline_priority);
+    /* opponent needs -> roster-aware survival -> Monte Carlo -> two-pick EV */
+    const needs=(myCurrent!=null&&myNext!=null)
+      ? Engine.opponentNeeds(league, order, myCurrent, myNext, DATA.players) : [];
+    const analytic=Engine.survivalProbabilities(available, needs);
+    const shortlist=available.slice(0,8).map(p=>p.player_key);
+    sim=needs.length
+      ? Engine.simulate(available, needs, {iterations:1500, seed:20260831,
+          candidates:shortlist})
+      : null;
 
-    return {picksMade,currentPick,myCurrent,myNext,untilNext,pool,
-      pickLabel:label(myCurrent??currentPick)};
+    const myRoster=myKeys().map(byKey).filter(Boolean).map(p=>[p.position,p.vbd??0]);
+    const baseline=Engine.bestLineup(league, myRoster);
+
+    const pool=available.map(p=>{
+      const a=analytic.estimates[p.player_key];
+      const s=sim?sim.survival[p.player_key]:undefined;
+      /* Blend the two exactly as the Python ranker does: they make different
+         approximations and averaging is more honest than choosing. */
+      const avail=(a!=null&&s!=null)?(a+s)/2:(a??s??null);
+      const up=(p.vbd!=null)
+        ? Math.max(0,Engine.bestLineup(league,[...myRoster,[p.position,p.vbd]])-baseline)
+        : null;
+      const gone=avail==null?null:1-avail;
+      return {...p, probability_available:avail, probability_gone:gone,
+        lineup_upgrade:up,
+        draft_now:(p.player_score??0)*0.7+((gone==null?0.5:gone)*100)*0.3};
+    }).sort((x,y)=>y.draft_now-x.draft_now);
+
+    return {picksMade:order.length,currentPick,myCurrent,myNext,untilNext,pool,needs,
+      losses:sim?sim.losses:analytic.losses, twoPick:sim?sim.twoPick:{},
+      iterations:sim?sim.iterations:0,
+      pickLabel:Engine.label(myCurrent??currentPick, league)};
   }
 
   return {
@@ -457,16 +418,14 @@ const Offline = (() => {
       if(slot==null) slot=Math.ceil(DATA.league.teams/2);
       return DATA;
     },
-    data:()=>DATA, analyse, label, slotFor, roundFor,
+    data:()=>DATA, analyse, byKey,
+    label:(o)=>Engine.label(o,L()),
     get slot(){return slot;}, set slot(v){slot=v;save();},
-    isDrafted:(k)=>drafted.has(k),
-    isMine:(k)=>mine.has(k),
-    markGone(k){ drafted.add(k); mine.delete(k); save(); },
-    markMine(k){ drafted.add(k); mine.add(k); save(); },
-    unmark(k){ drafted.delete(k); mine.delete(k); save(); },
-    reset(){ drafted.clear(); mine.clear(); save(); },
-    myKeys:()=>[...mine],
-    count:()=>drafted.size,
+    isDrafted:(k)=>order.includes(k),
+    markGone(k){ if(!order.includes(k)){order.push(k);save();} },
+    undo(){ const k=order.pop(); save(); return k; },
+    reset(){ order=[]; save(); },
+    myKeys, count:()=>order.length,
   };
 })();
 
@@ -476,11 +435,11 @@ let MODE="live";   // "live" = local engine via /api, "offline" = baked board.js
 function renderOfflineBanner(d){
   const cap=d.capabilities;
   alert_(
-    `<b>Offline board.</b> Scores were computed by the Python engine on
-     ${esc(d.generated_at.slice(0,10))} and baked in: ${cap.computed_in_python.slice(0,6).join(", ")}.
-     This page adds ${cap.computed_in_browser.join(", ")}.<br>
-     <b>Not available here:</b> ${cap.requires_local_engine.join(", ")} —
-     those need the engine running locally (<code>ff serve</code>).`);
+    `<b>Standalone mode.</b> Player scores were computed by the Python engine on
+     ${esc(d.generated_at.slice(0,10))}. Survival probability, the Monte Carlo and
+     two-pick expected value run here in the browser from a port that is tested against
+     the Python original on every build.<br>
+     <b>Still needs the local engine:</b> ${cap.requires_local_engine.join(", ")}.`);
 }
 
 function offlineSetSlot(){
@@ -511,16 +470,16 @@ function renderOffline(){
     <div class="statrow">
       <div class="statbox"><div class="v">${fmt(top.player_score)}</div><div class="k">Player score</div></div>
       <div class="statbox"><div class="v">${fmt(top.vbd,0)}</div><div class="k">VBD</div></div>
-      <div class="statbox"><div class="v" style="color:${urgency(top.probability_gone)}">${pct(top.probability_gone)}</div><div class="k">Gone by next*</div></div>
+      <div class="statbox"><div class="v" style="color:${urgency(top.probability_gone)}">${pct(top.probability_gone)}</div><div class="k">Gone by next</div></div>
       <div class="statbox"><div class="v">+${fmt(top.lineup_upgrade,0)}</div><div class="k">Adds to lineup</div></div>
     </div>
-    <div class="reason">Highest ranked available, tempered by how likely each player is to
-      be gone by <b>${a.myNext?esc(Offline.label(a.myNext)):"your next pick"}</b>.
-      <b>*</b> this is the ADP-only estimate; the local engine also weighs what the
-      managers ahead of you still need, which usually moves it several points.</div>
+    <div class="reason">Best available weighted by how likely each player is to be gone by
+      <b>${a.myNext?esc(Offline.label(a.myNext)):"your next pick"}</b>, using the roster
+      needs of the ${a.needs.length} managers picking in between.</div>
     <div class="altrow">
       <button class="altchip" onclick="offlineSetSlot()">Slot: <b>${Offline.slot}</b> — change</button>
-      <button class="altchip" onclick="if(confirm('Clear all drafted players?')){Offline.reset();renderOffline();}">Reset draft</button>
+      <button class="altchip" onclick="const k=Offline.undo();toast(k?'Undid last pick':'Nothing to undo');renderOffline();">Undo last</button>
+      <button class="altchip" onclick="if(confirm('Clear all drafted players?')){Offline.reset();renderOffline();}">Reset</button>
     </div>`;
 
   /* 4 — survival */
@@ -532,18 +491,25 @@ function renderOffline(){
           <div class="bar"><span style="width:${Math.round(r.probability_available*100)}%;background:${urgency(r.probability_gone)}"></span></div></div>
         <div class="survpct" style="color:${urgency(r.probability_gone)}">${pct(r.probability_available)}</div>
       </div>`).join("")+
-      `<div class="muted" style="margin-top:9px">ADP-only estimate for
-       <b>${esc(Offline.label(a.myNext))}</b>. Roster-aware survival needs <code>ff serve</code>.</div>`;
+      `<div class="muted" style="margin-top:9px">Chance still on the board at
+       <b>${esc(Offline.label(a.myNext))}</b>, from what the ${a.needs.length} managers
+       ahead of you still need, blended with ${a.iterations.toLocaleString()} simulations.</div>`;
 
-  /* 5 — not available offline, and said so */
-  $("whatIfBody").innerHTML=`<div class="empty">Two-pick expected value needs the Monte
-    Carlo simulation — run <code>ff serve</code> locally.<br>
-    <span class="muted">A JavaScript approximation would quietly disagree with the real
-    model, so it is not offered.</span></div>`;
+  /* 5 — two-pick expected value, from the in-browser simulation */
+  const tp=Object.values(a.twoPick).sort((x,y)=>y.combined-x.combined);
+  $("whatIfBody").innerHTML = !tp.length
+    ? `<div class="empty">Set your slot to price both picks.</div>`
+    : tp.map((r,i)=>{
+        const p=Offline.byKey(r.player_key)||{};
+        return `<div class="wi ${i===0?"best":""}">
+          <div><div class="n">${esc(p.name??r.player_key)}</div>
+            <div class="p">${fmt(r.value_now)} + ${fmt(r.expected_next_value)} at ${esc(Offline.label(a.myNext))}</div></div>
+          <div><div class="c">${fmt(r.combined)}</div>
+            <div class="d">${i===0?"best path":fmt(r.combined-tp[0].combined)}</div></div>
+        </div>`;}).join("")+
+      `<div class="muted" style="margin-top:9px">This pick plus the best player expected to
+       survive to your next one, over ${a.iterations.toLocaleString()} simulations.</div>`;
 
-  /* what you still need */
-  const filled={}; const lineup=[];
-  const roster=Offline.myKeys().map(k=>a.pool.concat(Offline.myKeys().map(x=>({}))) && null);
   renderOfflineNeeds(a);
 
   /* 2 — board */
@@ -647,8 +613,8 @@ function renderOfflineList(a){
       </div>
     </li>`).join("")||`<li class="empty">Nothing at this position.</li>`;
 
-  $("listHint").innerHTML="Swipe left to mark a player drafted by someone else. "+
-    "Tap the <b>%</b> badge to add them to <b>your</b> team.";
+  $("listHint").innerHTML="Tap or swipe a player to record the pick, in draft order. "+
+    "Whose pick it is follows from the snake, so your roster fills itself.";
   attachOfflineSwipe();
 }
 
@@ -669,16 +635,20 @@ function attachOfflineSwipe(){
     inner.addEventListener("touchend",()=>{
       inner.style.transition="";
       if(locked==="x"&&dx<-70){ Offline.markGone(row.dataset.key);
-        toast(`${row.dataset.name} — off the board`); renderOffline(); }
+        toast(`${row.dataset.name} recorded`); renderOffline(); }
       inner.style.transform=""; row.classList.remove("armed"); x0=null;});
-    row.querySelector(".gonebadge").onclick=()=>{
-      Offline.markMine(row.dataset.key);
-      toast(`${row.dataset.name} → your team`); renderOffline();
-    };
-    row.querySelector(".pname").onclick=()=>{
+    /* One action only: record the pick. Whose it is follows from snake order, exactly
+       as `ff draft pick` does, so offline and live agree on who owns what. */
+    const record=()=>{
+      const a=Offline.analyse();
+      const mine=Engine.slotFor(Offline.count()+1, Offline.data().league)===Offline.slot;
       Offline.markGone(row.dataset.key);
-      toast(`${row.dataset.name} — off the board`); renderOffline();
+      toast(`${row.dataset.name}${mine?" — yours":""}`);
+      renderOffline();
+      void a;
     };
+    row.querySelector(".gonebadge").onclick=record;
+    row.querySelector(".pname").onclick=record;
   });
 }
 
@@ -980,7 +950,8 @@ async function onClock(showBusy=true){
 $("clockBtn").onclick=()=>MODE==="live"?onClock():renderOffline();
 $("refreshBtn").onclick=()=>MODE==="live"?onClock():renderOffline();
 $("undoBtn").onclick=async()=>{
-  if(MODE==="offline"){ toast("Use Reset, or tap a player again"); return; }
+  if(MODE==="offline"){ const k=Offline.undo(); toast(k?"Undid last pick":"Nothing to undo");
+    renderOffline(); return; }
   try{ const d=await api("/api/undo",{});
     toast(d.removed?`Undid ${d.removed.name}`:"Nothing to undo");
     if(d.removed) await onClock(false);

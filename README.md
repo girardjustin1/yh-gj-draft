@@ -115,7 +115,7 @@ Three ways, by effort. All three run the **full** engine except the first.
 
 | | What you get | Effort |
 |---|---|---|
-| **GitHub Pages** (already live) | Static board: scores, tiers, floor/ceiling, mark-drafted, ADP-only survival. No two-pick EV, no roster-aware survival, no live sync. | done |
+| **GitHub Pages** (live) | Nearly everything: the full board, roster-aware survival, Monte Carlo, two-pick expected value, all in the browser. Not live Sleeper sync. | done |
 | **Your phone on the same wifi** | Everything | 10 seconds |
 | **Public URL to your laptop** | Everything, from anywhere | 2 minutes |
 | **Always-on deploy** | Everything, laptop off | ~10 minutes |
@@ -152,6 +152,23 @@ public nflverse data on boot (~8s), so no state ships in the image.
 
 The free tier sleeps when idle and cold-starts in ~30s — wake it a minute before your
 draft.
+
+### What the Pages build actually runs
+
+Slow, stable work — projections, VBD, replacement, tiers, floor/ceiling — is computed in
+Python by `ff export` and baked into `board.json`.
+
+The parts that depend on live draft state are **ported to JavaScript** in `engine.js`:
+opponent roster needs, roster-aware survival, the Monte Carlo, two-pick expected value,
+and marginal lineup value. About 80 ms for 1,500 simulations.
+
+Two implementations can drift, so they are checked rather than trusted:
+`tests/test_js_parity.py` runs `engine.js` under node against the Python originals on
+fixed inputs. Deterministic functions must match to 1e-9; the Monte Carlo, which cannot
+share numpy's RNG, is held to sampling error. 37 parity assertions.
+
+Still needs the local engine: live Sleeper sync, adaptive strategy state, and re-scoring
+after a data refresh.
 
 ### Refreshing the static board
 
