@@ -8,6 +8,7 @@ about what it does not know.
 from __future__ import annotations
 
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -37,10 +38,14 @@ config_app = typer.Typer(help="Inspect and validate league configuration.", no_a
 db_app = typer.Typer(help="Database maintenance.", no_args_is_help=True)
 data_app = typer.Typer(help="Ingest and inspect NFL/fantasy data.", no_args_is_help=True)
 import_app = typer.Typer(help="Import your own projections or ADP.", no_args_is_help=True)
+sleeper_app = typer.Typer(help="Connect to Sleeper (public read-only API).", no_args_is_help=True)
+draft_app = typer.Typer(help="Sync and inspect the live draft.", no_args_is_help=True)
 app.add_typer(config_app, name="config")
 app.add_typer(db_app, name="db")
 app.add_typer(data_app, name="data")
 app.add_typer(import_app, name="import")
+app.add_typer(sleeper_app, name="sleeper")
+app.add_typer(draft_app, name="draft")
 
 OK = "[green]OK[/green]"
 WARN = "[yellow]WARN[/yellow]"
@@ -655,6 +660,405 @@ def import_list(ctx: typer.Context) -> None:
         "[dim]Sources are blended by the weights in config/data_sources.yaml. "
         "The derived curve is always kept as a floor so no player drops off the board.[/dim]"
     )
+
+
+# --- sleeper -------------------------------------------------------------------------
+
+
+def _sleeper(cfg):
+    from .data.sleeper import SleeperClient
+
+    return SleeperClient(cfg)
+
+
+@sleeper_app.command("connect")
+def sleeper_connect(
+    ctx: typer.Context,
+    username: Annotated[str, typer.Argument(help="Your Sleeper username (not display name).")],
+) -> None:
+    """Link a Sleeper account. Read-only: no password, no token, nothing is stored remotely."""
+    from .data.sleeper import SleeperError, SleeperNotFound
+
+    cfg = get_config(ctx)
+    with _sleeper(cfg) as client:
+        try:
+            user = client.get_user(username)
+        except SleeperNotFound as exc:
+            err_console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=1) from exc
+        except SleeperError as exc:
+            err_console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=2) from exc
+
+    with connect(cfg.paths.db_path) as db:
+        db.set_meta("sleeper_user_id", str(user["user_id"]))
+        db.set_meta("sleeper_username", str(user.get("username") or username))
+
+    console.print(
+        f"{OK} connected as [bold]{user.get('display_name') or username}[/bold] "
+        f"[dim](user_id {user['user_id']})[/dim]"
+    )
+    console.print("Next: [bold]ff sleeper leagues[/bold]")
+
+
+@sleeper_app.command("leagues")
+def sleeper_leagues(
+    ctx: typer.Context,
+    season: Annotated[int | None, typer.Option("--season", help="Defaults to your league season.")] = None,
+) -> None:
+    """List your Sleeper leagues for the season."""
+    from .data.sleeper import SleeperError
+
+    cfg = get_config(ctx)
+    with connect(cfg.paths.db_path) as db:
+        user_id = db.get_meta("sleeper_user_id")
+        username = db.get_meta("sleeper_username")
+    if not user_id:
+        err_console.print("Not connected. Run [bold]ff sleeper connect USERNAME[/bold] first.")
+        raise typer.Exit(code=1)
+
+    target = season or cfg.league.season
+    with _sleeper(cfg) as client:
+        try:
+            leagues = client.get_leagues(user_id, target)
+        except SleeperError as exc:
+            err_console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=2) from exc
+
+    if not leagues:
+        console.print(f"[yellow]No {target} leagues found for {username}.[/yellow]")
+        console.print(f"[dim]Try another season: ff sleeper leagues --season {target - 1}[/dim]")
+        return
+
+    table = Table(title=f"{username} — {target} leagues", header_style="bold", title_justify="left")
+    for column in ("League ID", "Name", "Teams", "Scoring", "Status", "Draft"):
+        table.add_column(column, style="cyan" if column == "League ID" else "")
+    for league in leagues:
+        table.add_row(
+            league.league_id, league.name, str(league.total_rosters), league.scoring_type,
+            league.status, league.draft_id or "[dim]none[/dim]",
+        )
+    console.print(table)
+    console.print("\nNext: [bold]ff sleeper use-league <league_id>[/bold]")
+
+
+@sleeper_app.command("use-league")
+def sleeper_use_league(
+    ctx: typer.Context,
+    league_id: Annotated[str, typer.Argument(help="From `ff sleeper leagues`.")],
+    write_config: Annotated[
+        bool, typer.Option("--write/--no-write", help="Update config/league.yaml from Sleeper.")
+    ] = True,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation.")] = False,
+) -> None:
+    """Select a league, and derive league settings from Sleeper.
+
+    Scoring rules, roster slots, and draft format come straight from the platform, so
+    replacement level and VBD reflect your actual league rather than a default.
+    """
+    import yaml
+
+    from .data.sleeper import SleeperError, infer_draft_settings, infer_roster, infer_scoring
+
+    cfg = get_config(ctx)
+    with _sleeper(cfg) as client:
+        try:
+            league = client.get_league(league_id)
+            drafts = client.get_league_drafts(league_id)
+        except SleeperError as exc:
+            err_console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=2) from exc
+
+    draft = drafts[0] if drafts else None
+    draft_settings = infer_draft_settings(draft) if draft else {}
+    scoring = infer_scoring(league)
+    roster = infer_roster(league)
+
+    console.print(Panel(league.label, border_style="cyan"))
+    summary = Table(show_header=False, box=None)
+    summary.add_column(style="dim")
+    summary.add_column()
+    summary.add_row("Teams", str(league.total_rosters))
+    summary.add_row("Reception", str(scoring.get("reception", "not set")))
+    summary.add_row("Passing TD", str(scoring.get("passing_td", "not set")))
+    summary.add_row(
+        "Roster", ", ".join(f"{k}={v}" for k, v in sorted(roster.items())) or "unknown"
+    )
+    if draft_settings:
+        summary.add_row(
+            "Draft",
+            f"{draft_settings['type']}, {draft_settings['rounds']} rounds"
+            + (", third-round reversal" if draft_settings["third_round_reversal"] else ""),
+        )
+        summary.add_row("Draft ID", str(draft.get("draft_id")))
+    console.print(summary)
+
+    if roster.get("superflex"):
+        console.print(
+            "[bold yellow]This is a superflex league.[/bold yellow] "
+            "Quarterback replacement level moves a long way — this is the single "
+            "setting that changes valuation most."
+        )
+
+    with connect(cfg.paths.db_path) as db:
+        db.set_meta("sleeper_league_id", league_id)
+        if draft:
+            db.set_meta("sleeper_draft_id", str(draft.get("draft_id")))
+
+    if not write_config:
+        console.print(f"\n{OK} league selected. config/league.yaml left unchanged.")
+        return
+
+    path = cfg.paths.league_file
+    if path.exists() and not yes:
+        console.print(f"\n[yellow]This will overwrite {path}.[/yellow]")
+        typer.confirm("Write these settings?", abort=True)
+
+    existing = {}
+    if path.exists():
+        existing = yaml.safe_load(path.read_text()) or {}
+
+    existing.update(
+        {
+            "name": league.name,
+            "season": int(league.season),
+            "platform": "sleeper",
+            "league_id": league_id,
+            "draft_id": str(draft.get("draft_id")) if draft else None,
+            "teams": league.total_rosters,
+        }
+    )
+    if roster:
+        existing.setdefault("roster", {})
+        existing["roster"].update(roster)
+    if scoring:
+        existing.setdefault("scoring", {})
+        existing["scoring"].update(scoring)
+    if draft_settings:
+        existing.setdefault("draft", {})
+        existing["draft"].update(
+            {
+                "type": draft_settings["type"],
+                "rounds": draft_settings["rounds"],
+                "third_round_reversal": draft_settings["third_round_reversal"],
+            }
+        )
+        if draft_settings.get("pick_timer"):
+            existing["draft"]["seconds_on_clock"] = draft_settings["pick_timer"]
+
+    header = (
+        "# Written by `ff sleeper use-league` from your Sleeper league settings.\n"
+        f"# League: {league.name} ({league_id})\n"
+        f"# Generated: {__import__('datetime').datetime.now():%Y-%m-%d %H:%M}\n"
+        "# Your draft slot is not knowable until the draft order is set; run\n"
+        "# `ff draft sync` once it is, or set draft.slot by hand.\n\n"
+    )
+    path.write_text(header + yaml.safe_dump(existing, sort_keys=False))
+    console.print(f"\n{OK} wrote {path}")
+    console.print("Verify with [bold]ff config show[/bold], then [bold]ff draft sync[/bold].")
+
+
+@sleeper_app.command("status")
+def sleeper_status(ctx: typer.Context) -> None:
+    """Show the connected Sleeper account and selected league."""
+    cfg = get_config(ctx)
+    with connect(cfg.paths.db_path) as db:
+        rows = {
+            "Username": db.get_meta("sleeper_username"),
+            "User ID": db.get_meta("sleeper_user_id"),
+            "League ID": db.get_meta("sleeper_league_id"),
+            "Draft ID": db.get_meta("sleeper_draft_id"),
+        }
+    table = Table(show_header=False, box=None)
+    table.add_column(style="dim")
+    table.add_column()
+    for key, value in rows.items():
+        table.add_row(key, value or "[dim]not set[/dim]")
+    console.print(table)
+    with _sleeper(cfg) as client:
+        age = client.players_cache_age_hours()
+    console.print(
+        f"[dim]Sleeper player cache: "
+        f"{'never fetched' if age is None else f'{age:.1f}h old'}[/dim]"
+    )
+
+
+# --- draft ---------------------------------------------------------------------------
+
+
+def _resolve_draft_id(cfg, db, explicit: str | None) -> str:
+    draft_id = explicit or cfg.league.draft_id or db.get_meta("sleeper_draft_id")
+    if not draft_id:
+        err_console.print(
+            "No draft selected. Run [bold]ff sleeper use-league <league_id>[/bold], "
+            "or pass [bold]--draft-id[/bold]."
+        )
+        raise typer.Exit(code=1)
+    return str(draft_id)
+
+
+@draft_app.command("sync")
+def draft_sync(
+    ctx: typer.Context,
+    draft_id: Annotated[str | None, typer.Option("--draft-id")] = None,
+) -> None:
+    """Fetch the live draft and store it locally."""
+    from .data.sleeper import SleeperError
+    from .draft.providers import SleeperDraftProvider
+    from .draft.store import load_state, save_state
+
+    cfg = get_config(ctx)
+    with connect(cfg.paths.db_path) as db:
+        target = _resolve_draft_id(cfg, db, draft_id)
+        provider = SleeperDraftProvider(cfg, db)
+        try:
+            with console.status("[cyan]Syncing draft...", spinner="dots"):
+                state = provider.fetch_state(target)
+        except SleeperError as exc:
+            previous = load_state(db, target)
+            if previous is None:
+                err_console.print(f"[red]{exc}[/red]")
+                raise typer.Exit(code=2) from exc
+            from .data.sleeper import source_freshness
+
+            console.print(
+                f"[yellow]Sleeper unreachable ({exc}).[/yellow]\n"
+                f"Using the last synced board from "
+                f"[bold]{source_freshness(previous.synced_at)}[/bold] — treat it as stale."
+            )
+            state = previous
+        else:
+            save_state(db, state, settings={"league_id": db.get_meta("sleeper_league_id")})
+            db.log_refresh("sleeper_draft", "draft_picks", "ok", rows=state.picks_made)
+
+            if state.my_slot and cfg.league.draft.slot != state.my_slot:
+                console.print(
+                    f"[yellow]Your draft slot is {state.my_slot}[/yellow] but "
+                    f"config/league.yaml says "
+                    f"{cfg.league.draft.slot or 'unset'}. Set "
+                    f"[bold]draft.slot: {state.my_slot}[/bold] so the snake math is right."
+                )
+
+        unresolved = state.unresolved_pick_count
+
+    console.print(
+        f"{OK} synced [bold]{state.picks_made}[/bold] picks — "
+        f"on the clock: [bold]{state.pick_label}[/bold] (slot {state.current_slot})"
+    )
+    if unresolved:
+        console.print(
+            f"[yellow]{unresolved} pick(s) could not be matched to a canonical "
+            f"player.[/yellow] They still count as off the board."
+        )
+    console.print("Next: [bold]ff draft status[/bold] or [bold]ff on-clock[/bold]")
+
+
+@draft_app.command("status")
+def draft_status(
+    ctx: typer.Context,
+    draft_id: Annotated[str | None, typer.Option("--draft-id")] = None,
+    rosters: Annotated[bool, typer.Option("--rosters", help="Show every team's roster.")] = False,
+) -> None:
+    """Show the current board state from the last sync."""
+    from .data.sleeper import source_freshness
+    from .draft.store import load_state
+
+    cfg = get_config(ctx)
+    with connect(cfg.paths.db_path) as db:
+        state = load_state(db, draft_id)
+    if state is None:
+        err_console.print("No draft synced yet. Run [bold]ff draft sync[/bold].")
+        raise typer.Exit(code=1)
+
+    freshness = source_freshness(state.synced_at)
+    stale = (datetime.now() - state.synced_at).total_seconds() > 180
+    header = Text.assemble(
+        (f"Draft {state.draft_id}", "bold"), "  ",
+        (f"{state.board.teams}-team {state.board.draft_type}", "cyan"), "\n",
+        ("synced ", "dim"),
+        (freshness, "yellow" if stale else "dim"),
+        (" — re-run `ff draft sync`" if stale else "", "yellow"),
+    )
+    console.print(Panel(header, border_style="yellow" if stale else "cyan"))
+
+    info = Table(show_header=False, box=None)
+    info.add_column(style="dim")
+    info.add_column()
+    info.add_row("On the clock", f"{state.pick_label} (overall {state.current_pick})")
+    info.add_row("Picks made", f"{state.picks_made} of {state.board.total_picks}")
+    info.add_row("My slot", str(state.my_slot) if state.my_slot else "[dim]unknown[/dim]")
+    if state.my_slot:
+        info.add_row(
+            "My next pick",
+            f"{state.board.label(state.my_current_pick)} (overall {state.my_current_pick})"
+            if state.my_current_pick else "[dim]none left[/dim]",
+        )
+        if state.picks_until_my_turn is not None:
+            info.add_row(
+                "Until my turn",
+                "[bold green]ON THE CLOCK[/bold green]" if state.is_my_pick
+                else f"{state.picks_until_my_turn} picks",
+            )
+    console.print(info)
+
+    roster = state.my_roster()
+    if roster and roster.player_keys:
+        with connect(cfg.paths.db_path) as db:
+            names = db.query(
+                "SELECT player_key, full_name, position, team FROM players "
+                f"WHERE player_key IN ({', '.join('?' for _ in roster.player_keys)})",
+                roster.player_keys,
+            )
+        lookup = {r["player_key"]: r for r in names.to_dicts()}
+        mine = Table(title="My roster", header_style="bold", title_justify="left")
+        mine.add_column("Pos", style="cyan")
+        mine.add_column("Player")
+        mine.add_column("Tm", style="dim")
+        for pick in state.picks:
+            if pick.player_key in roster.player_keys:
+                row = lookup.get(pick.player_key, {})
+                mine.add_row(
+                    pick.position or row.get("position") or "",
+                    pick.player_name or row.get("full_name") or pick.player_key,
+                    pick.nfl_team or row.get("team") or "",
+                )
+        console.print(mine)
+
+    recent = state.recent_picks(10)
+    if recent:
+        last = Table(title="Last 10 picks", header_style="bold", title_justify="left")
+        for column in ("Pick", "Slot", "Player", "Pos", "Tm"):
+            last.add_column(column, style="dim" if column in ("Pick", "Slot") else "")
+        for pick in recent:
+            last.add_row(
+                state.board.label(pick.overall), str(pick.slot),
+                pick.player_name or "[dim]unknown[/dim]", pick.position or "",
+                pick.nfl_team or "",
+            )
+        console.print(last)
+
+    runs = state.position_runs(12)
+    if runs:
+        console.print(
+            "[dim]Last 12 picks: "
+            + ", ".join(f"{p} {share * 100:.0f}%" for p, share in
+                        sorted(runs.items(), key=lambda kv: -kv[1]))
+            + "[/dim]"
+        )
+
+    if rosters:
+        every = Table(title="All rosters", header_style="bold", title_justify="left")
+        every.add_column("Slot", style="dim")
+        every.add_column("Team")
+        every.add_column("Roster")
+        for snapshot in sorted(state.rosters().values(), key=lambda r: r.slot):
+            label = state.team_names.get(snapshot.team_id, snapshot.team_id)
+            every.add_row(
+                str(snapshot.slot),
+                f"[bold]{label}[/bold]" if snapshot.is_me else label,
+                ", ".join(f"{p}{n}" for p, n in sorted(snapshot.position_counts.items())),
+            )
+        console.print(every)
 
 
 # --- players -------------------------------------------------------------------------

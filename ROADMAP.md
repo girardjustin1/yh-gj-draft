@@ -107,15 +107,36 @@ bench hoarding — which is exactly the point the spec makes.
 
 ---
 
-## ⬜ Phase 3 — Sleeper
+## ✅ Phase 3 — Sleeper
 
-- `data/sleeper.py` — public read-only API: user, leagues, league, rosters, drafts,
-  draft, picks, players
-- `DraftProvider` interface + `SleeperDraftProvider`
-- `draft/state.py` — canonical `DraftState`; `draft/availability.py`
-- `ff sleeper connect|leagues|use-league`, `ff draft sync`, `ff draft status`
+**Built**
+- `data/sleeper.py` — cached public read-only client; `infer_scoring` / `infer_roster` /
+  `infer_draft_settings` translate a Sleeper league into our config
+- `draft/providers.py` — `DraftProvider` protocol, `SleeperDraftProvider`,
+  `FixtureDraftProvider`, and `PlayerKeyResolver` (ffverse map → Sleeper's own gsis_id →
+  DST team code → unique name+position)
+- `draft/state.py` — canonical `DraftState`; `draft/store.py` — DuckDB persistence;
+  `draft/fixtures.py` — deterministic synthetic drafts
+- `ff sleeper connect|leagues|use-league|status`, `ff draft sync|status`
 
-**Acceptance** — the live Sleeper board is represented accurately.
+**Acceptance** ✅ — verified end to end against the fixture: a 12-team half-PPR snake at
+slot 7, 40 picks made, correctly reports on the clock 4.05, our next pick 4.06, the one
+after at 5.07, 12 intervening managers, our reconstructed roster, and the last-12-pick
+position mix. Round-trips through DuckDB unchanged.
+
+**Findings**
+- **Sleeper answers an unknown username with HTTP 200 and a body of `null`**, not a 404.
+  Treating a 200 as success would silently "connect" you to nothing, so the client
+  raises `SleeperNotFound` on a null body.
+- `/players/nfl` is a **14.6 MB** document that Sleeper asks be fetched at most daily; it
+  is cached on disk so a live draft never pays for it. It carries `gsis_id` directly,
+  which makes pick resolution exact rather than name-based.
+- `ff sleeper use-league` derives scoring, roster slots and draft format from the
+  platform, so replacement level reflects the real league. It confirms before
+  overwriting `config/league.yaml`, and calls out superflex explicitly.
+- A pick we cannot resolve is still recorded as off the board and counted in
+  `unresolved_pick_count`, so a recommendation can say the board is imperfect rather
+  than quietly treating that player as available.
 
 ---
 
