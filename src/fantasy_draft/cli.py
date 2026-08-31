@@ -1528,6 +1528,44 @@ def _render_on_clock(analysis, limit: int = 8, position: str | None = None) -> N
         console.print(f"[yellow]note:[/yellow] [dim]{warning}[/dim]")
 
 
+@app.command("export")
+def export_cmd(
+    ctx: typer.Context,
+    out: Annotated[Path, typer.Option("--out", "-o", help="Output directory.")] = Path("docs"),
+    limit: Annotated[int, typer.Option("--limit", help="Players to export.")] = 400,
+) -> None:
+    """Bake the scored board into a static site (for GitHub Pages or any web host).
+
+    Everything not dependent on live draft state is computed here, in Python. The page
+    then does snake maths, ADP-only survival, and marginal lineup value in the browser.
+    Roster-aware survival, two-pick EV and live sync need `ff serve`.
+    """
+    from .api.export import write_static_site
+
+    cfg = get_config(ctx)
+    with connect(cfg.paths.db_path) as db:
+        if db.row_count("projections") == 0:
+            err_console.print("No board to export. Run [bold]ff data refresh[/bold] first.")
+            raise typer.Exit(code=1)
+        try:
+            summary = write_static_site(db, cfg, out, limit=limit)
+        except RuntimeError as exc:
+            err_console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=1) from exc
+
+    console.print(
+        f"{OK} exported [bold]{summary['players']}[/bold] players to "
+        f"[bold]{summary['out_dir']}/[/bold] "
+        f"([dim]board.json {summary['board_bytes'] / 1024:.0f} KB[/dim])"
+    )
+    console.print(
+        "[dim]Serve that directory anywhere, or commit it and enable GitHub Pages.\n"
+        "The offline page carries the full scored board; the live engine "
+        "(roster-aware survival, two-pick EV, Sleeper sync) still needs "
+        "[bold]ff serve[/bold].[/dim]"
+    )
+
+
 @app.command("simulate")
 def simulate_cmd(
     ctx: typer.Context,
