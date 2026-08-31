@@ -6,14 +6,22 @@ and Claude call. Business logic in an HTTP handler is how a GUI and an assistant
 disagreeing mid-draft, so there is none here.
 
 It binds to localhost by default. The data is your league's; nothing leaves the machine.
+
+**If you expose it beyond localhost** — a LAN bind for your phone, a tunnel, or a hosted
+deploy — set ``FF_ACCESS_TOKEN``. Without it every endpoint is open to anyone who can
+reach the port, which during a live draft means your board, your roster, and your
+recommendations. The server refuses to start on a non-loopback host without a token
+rather than leaving that to chance.
 """
 
 from __future__ import annotations
 
+import os
+import secrets
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -75,6 +83,38 @@ def create_app(cfg: AppConfig | None = None) -> FastAPI:
         openapi_url="/api/openapi.json",
     )
     app.state.cfg = configuration
+
+    # --- optional access control ------------------------------------------------------
+    #
+    # Only engaged when FF_ACCESS_TOKEN is set. Accepts the key as a header, a query
+    # parameter, or a cookie, and sets the cookie on first use so a phone only has to
+    # follow the link once. This is a shared secret over your own network, not an
+    # identity system -- it exists so a tunnelled or hosted instance is not simply open.
+    token = os.environ.get("FF_ACCESS_TOKEN", "").strip()
+    app.state.access_token = token
+
+    if token:
+        @app.middleware("http")
+        async def require_token(request: Request, call_next):
+            supplied = (
+                request.headers.get("x-ff-key")
+                or request.query_params.get("k")
+                or request.cookies.get("ff_key")
+            )
+            if not secrets.compare_digest(str(supplied or ""), token):
+                return JSONResponse(
+                    status_code=401,
+                    content={
+                        "error": "unauthorized",
+                        "detail": "Append ?k=YOUR_TOKEN to the URL, or send an X-FF-Key header.",
+                    },
+                )
+            response = await call_next(request)
+            if request.query_params.get("k"):
+                response.set_cookie(
+                    "ff_key", token, httponly=True, samesite="lax", max_age=60 * 60 * 12
+                )
+            return response
 
     def config_of() -> AppConfig:
         return app.state.cfg
@@ -317,9 +357,27 @@ def create_app(cfg: AppConfig | None = None) -> FastAPI:
 app = None  # populated by `ff serve`; import-time config loading would fight the tests
 
 
+class InsecureBindError(RuntimeError):
+    """Refusing to expose the engine without an access token."""
+
+
 def run(host: str = "127.0.0.1", port: int = 8000, reload: bool = False) -> None:
-    """Start the server."""
+    """Start the server.
+
+    Binding beyond loopback without ``FF_ACCESS_TOKEN`` is refused: during a live draft
+    an open port hands your board and roster to anyone who can reach it.
+    """
     import uvicorn
+
+    loopback = host in {"127.0.0.1", "localhost", "::1"}
+    if not loopback and not os.environ.get("FF_ACCESS_TOKEN", "").strip():
+        raise InsecureBindError(
+            f"Refusing to bind {host} without an access token.\n"
+            "Anyone who can reach this port would see your draft.\n\n"
+            "Set one first, for example:\n"
+            f"  export FF_ACCESS_TOKEN=$(python3 -c 'import secrets;print(secrets.token_urlsafe(12))')\n"
+            "then open the URL with ?k=YOUR_TOKEN once on each device."
+        )
 
     uvicorn.run(
         "fantasy_draft.api.service:create_app",

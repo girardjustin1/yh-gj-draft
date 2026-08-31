@@ -109,6 +109,57 @@ One button press calls `analyze_current_pick()` once; the page only renders. No 
 step, no framework, no external requests — it binds to localhost and nothing leaves the
 machine.
 
+## Getting the board online
+
+Three ways, by effort. All three run the **full** engine except the first.
+
+| | What you get | Effort |
+|---|---|---|
+| **GitHub Pages** (already live) | Static board: scores, tiers, floor/ceiling, mark-drafted, ADP-only survival. No two-pick EV, no roster-aware survival, no live sync. | done |
+| **Your phone on the same wifi** | Everything | 10 seconds |
+| **Public URL to your laptop** | Everything, from anywhere | 2 minutes |
+| **Always-on deploy** | Everything, laptop off | ~10 minutes |
+
+### Phone on the same wifi — full engine
+
+```bash
+export FF_ACCESS_TOKEN=$(python3 -c 'import secrets;print(secrets.token_urlsafe(9))')
+ff serve --host 0.0.0.0
+```
+
+It prints your LAN URL with the key attached. Open it once on the phone; a cookie keeps
+you signed in for 12 hours.
+
+**A token is required for any non-loopback bind — the server refuses to start without
+one.** An open port during a draft hands your board and roster to anyone who can reach it.
+
+### Public URL to your laptop
+
+```bash
+brew install cloudflared
+export FF_ACCESS_TOKEN=$(python3 -c 'import secrets;print(secrets.token_urlsafe(9))')
+ff serve --host 0.0.0.0 &
+cloudflared tunnel --url http://localhost:8000
+```
+
+Gives an HTTPS URL that works anywhere. Your laptop has to stay awake.
+
+### Always-on deploy
+
+`Dockerfile` and `render.yaml` are included. On Render: New → Blueprint → point at this
+repo. `FF_ACCESS_TOKEN` is generated for you, and the database rebuilds itself from
+public nflverse data on boot (~8s), so no state ships in the image.
+
+The free tier sleeps when idle and cold-starts in ~30s — wake it a minute before your
+draft.
+
+### Refreshing the static board
+
+```bash
+ff data refresh && ff export --out docs
+git add docs && git commit -m "refresh board" && git push
+```
+
 ## With Claude
 
 A project skill lives at `.claude/skills/draft/SKILL.md`. In Claude Code, say:

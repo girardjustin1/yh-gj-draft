@@ -1690,7 +1690,7 @@ def serve_cmd(
     Binds to localhost by default — your league data never leaves the machine.
     """
     try:
-        from .api.service import run
+        from .api.service import InsecureBindError, run
     except ImportError as exc:
         err_console.print(
             "[red]Web dependencies are not installed.[/red]\n"
@@ -1704,11 +1704,27 @@ def serve_cmd(
     if not ready:
         console.print("[yellow]No projections yet — run [bold]ff data refresh[/bold] first.[/yellow]")
 
+    import os
+
+    token = os.environ.get("FF_ACCESS_TOKEN", "").strip()
+    shown_host = host
+    if host == "0.0.0.0":  # noqa: S104 — intentional, and gated on a token below
+        import socket
+
+        try:
+            probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            probe.connect(("8.8.8.8", 80))
+            shown_host = probe.getsockname()[0]
+            probe.close()
+        except OSError:
+            shown_host = host
+
+    suffix = f"?k={token}" if token else ""
     console.print(
         Panel(
             Text.assemble(
                 ("Fantasy Draft AI\n", "bold"),
-                (f"http://{host}:{port}\n", "bold cyan"),
+                (f"http://{shown_host}:{port}{suffix}\n", "bold cyan"),
                 (f"API docs: http://{host}:{port}/api/docs\n\n", "dim"),
                 ("Press ", "dim"), ("C", "bold"), (" on the page, or click ", "dim"),
                 ("I'M ON THE CLOCK", "bold"), (", to analyse the current pick.\n", "dim"),
@@ -1717,7 +1733,16 @@ def serve_cmd(
             border_style="cyan",
         )
     )
-    run(host=host, port=port, reload=reload)
+    if token and host != "127.0.0.1":
+        console.print(
+            "[dim]Access token is set — open the link above (with ?k=...) once on each "
+            "device; it stores a cookie.[/dim]"
+        )
+    try:
+        run(host=host, port=port, reload=reload)
+    except InsecureBindError as exc:
+        err_console.print(Panel(str(exc), title="Refusing to start", border_style="red"))
+        raise typer.Exit(code=2) from exc
 
 
 @app.command("compare-picks")

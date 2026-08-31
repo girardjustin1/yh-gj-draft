@@ -211,3 +211,79 @@ class TestPage:
 
     def test_openapi_is_available(self, client):
         assert client.get("/api/openapi.json").status_code == 200
+
+
+class TestAccessControl:
+    """Exposing the engine beyond localhost must not be silently open.
+
+    These exist because the first hand-test of this appeared to pass while actually
+    hitting a stale server on the same port — auth that is merely believed to work is
+    worse than none.
+    """
+
+    @pytest.fixture
+    def guarded(self, tmp_config, db, monkeypatch):
+        monkeypatch.setenv("FF_ACCESS_TOKEN", "s3cret-token")
+        db.close()
+        return TestClient(create_app(tmp_config), raise_server_exceptions=False)
+
+    def test_no_token_is_rejected(self, guarded):
+        response = guarded.get("/api/health")
+        assert response.status_code == 401
+        assert "k=" in response.json()["detail"]
+
+    def test_wrong_token_is_rejected(self, guarded):
+        assert guarded.get("/api/health", params={"k": "nope"}).status_code == 401
+
+    def test_query_parameter_works(self, guarded):
+        assert guarded.get("/api/health", params={"k": "s3cret-token"}).status_code == 200
+
+    def test_header_works(self, guarded):
+        response = guarded.get("/api/health", headers={"X-FF-Key": "s3cret-token"})
+        assert response.status_code == 200
+
+    def test_cookie_is_set_so_a_phone_needs_the_link_once(self, guarded):
+        response = guarded.get("/", params={"k": "s3cret-token"})
+        assert response.status_code == 200
+        assert "ff_key" in response.cookies
+
+    def test_the_page_itself_is_protected(self, guarded):
+        """Not just the API — the board is on the page too."""
+        assert guarded.get("/").status_code == 401
+
+    def test_writes_are_protected(self, guarded):
+        assert guarded.post("/api/pick", json={"player_key": "x"}).status_code == 401
+
+    def test_no_token_configured_leaves_everything_open(self, client):
+        """Localhost default: unauthenticated, which is correct for a loopback bind."""
+        assert client.get("/api/health").status_code == 200
+
+
+class TestInsecureBindRefusal:
+    def test_binding_publicly_without_a_token_is_refused(self, monkeypatch):
+        from fantasy_draft.api.service import InsecureBindError, run
+
+        monkeypatch.delenv("FF_ACCESS_TOKEN", raising=False)
+        with pytest.raises(InsecureBindError, match="without an access token"):
+            run(host="0.0.0.0", port=8123)
+
+    def test_loopback_needs_no_token(self, monkeypatch):
+        """Refusal must not block the normal local case."""
+        import fantasy_draft.api.service as svc
+
+        monkeypatch.delenv("FF_ACCESS_TOKEN", raising=False)
+        started = {}
+        monkeypatch.setattr(
+            "uvicorn.run", lambda *a, **k: started.update(k) or None
+        )
+        svc.run(host="127.0.0.1", port=8123)
+        assert started["host"] == "127.0.0.1"
+
+    def test_public_bind_with_a_token_is_allowed(self, monkeypatch):
+        import fantasy_draft.api.service as svc
+
+        monkeypatch.setenv("FF_ACCESS_TOKEN", "abc")
+        started = {}
+        monkeypatch.setattr("uvicorn.run", lambda *a, **k: started.update(k) or None)
+        svc.run(host="0.0.0.0", port=8123)
+        assert started["host"] == "0.0.0.0"

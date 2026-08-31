@@ -1,0 +1,26 @@
+# One-click deploy to Render. https://render.com/deploy
+#
+# Gives an always-on HTTPS URL running the FULL engine — roster-aware survival, Monte
+# Carlo two-pick expected value, live Sleeper sync — rather than the static board on
+# GitHub Pages.
+#
+# Two things to know:
+#   * FF_ACCESS_TOKEN is generated for you. Without it the server refuses to start on a
+#     public interface, because an open port during a draft exposes your board.
+#   * The free tier sleeps after inactivity and cold-starts in ~30s while it rebuilds
+#     the database from public data. Fine before a draft; wake it a minute early.
+services:
+  - type: web
+    name: yh-gj-draft
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: FF_ACCESS_TOKEN
+        generateValue: true
+      - key: FF_DATA_DIR
+        value: /data
+    disk:
+      name: draft-data
+      mountPath: /data
+      sizeGB: 1
