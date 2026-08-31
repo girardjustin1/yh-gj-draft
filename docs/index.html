@@ -533,6 +533,16 @@ const Offline = (() => {
       if(slot==null) slot=Math.ceil(DATA.league.teams/2);
       return DATA;
     },
+    /* Pull a newer board without losing the draft. Scores are recomputed in Python and
+       redeployed, so this is the only way a static build sees moved ADP or a fresh
+       projection import. Recorded picks live in localStorage and are untouched. */
+    async reload(){
+      const before=DATA?DATA.generated_at:null;
+      const res=await fetch("board.json?t="+Date.now(),{cache:"no-store"});
+      if(!res.ok) throw new Error("could not reach board.json");
+      DATA=await res.json();
+      return {changed: before!==DATA.generated_at, generated_at:DATA.generated_at, before};
+    },
     data:()=>DATA, analyse, byKey,
     label:(o)=>Engine.label(o,L()),
     get slot(){return slot;}, set slot(v){slot=v;save();},
@@ -625,6 +635,7 @@ function renderOffline(){
       </div>`).join("")}
     <div class="altrow">
       <button class="altchip" onclick="offlineSetSlot()">Slot: <b>${Offline.slot}</b> — change</button>
+      <span class="altchip" style="cursor:default">Scored <b>${esc(d.generated_at.slice(0,10))}</b></span>
       <button class="altchip" onclick="const k=Offline.undo();toast(k?'Undid last pick':'Nothing to undo');renderOffline();">Undo last</button>
       <button class="altchip" onclick="if(confirm('Clear all drafted players?')){Offline.reset();renderOffline();}">Reset</button>
     </div>`;
@@ -1184,7 +1195,21 @@ async function onClock(showBusy=true){
   }finally{ btn.disabled=false; btn.textContent="ANALYSE PICK"; }
 }
 
-$("clockBtn").onclick=()=>MODE==="live"?onClock():renderOffline();
+async function offlineUpdate(){
+  const btn=$("clockBtn");
+  btn.disabled=true; btn.textContent="CHECKING…";
+  try{
+    const r=await Offline.reload();
+    renderOffline();
+    toast(r.changed
+      ? `Board updated — ${r.generated_at.slice(0,10)}`
+      : `Already current — scored ${r.generated_at.slice(0,10)}`);
+  }catch(e){
+    toast("Could not reach the board — showing what is cached");
+    renderOffline();
+  }finally{ btn.disabled=false; btn.textContent="UPDATE BOARD"; }
+}
+$("clockBtn").onclick=()=>MODE==="live"?onClock():offlineUpdate();
 $("refreshBtn").onclick=()=>MODE==="live"?onClock():renderOffline();
 $("undoBtn").onclick=async()=>{
   if(MODE==="offline"){ const k=Offline.undo(); toast(k?"Undid last pick":"Nothing to undo");

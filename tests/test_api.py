@@ -311,6 +311,22 @@ class TestDraftControls:
         assert "How this works" in page
         assert "Set your draft slot" in page
 
+    def test_update_board_refetches_rather_than_re_rendering(self, client):
+        """The button said UPDATE BOARD while only re-rendering what was already shown.
+
+        Every DRAFT tap and swipe already re-renders, so it was a no-op with a label that
+        implied it fetched fresh projections. It now re-reads board.json, which is the
+        only way a static build ever sees a new export.
+        """
+        page = client.get("/").text
+        assert "async reload()" in page
+        assert "board.json?t=" in page          # cache-busted refetch
+        assert "offlineUpdate" in page
+
+    def test_the_board_date_is_visible(self, client):
+        """You cannot judge a board without knowing when it was scored."""
+        assert "Scored <b>${esc(d.generated_at" in client.get("/").text
+
     def test_page_shows_team_strength(self, client):
         page = client.get("/").text
         assert "Team strength by position" in page
