@@ -22,6 +22,30 @@ def client(tmp_config, db):
 
 
 @pytest.fixture
+def client_with_data(tmp_config, db):
+    """A client whose database holds one real player, so picks can be resolved."""
+    import polars as pl
+
+    db.replace_table(
+        "players",
+        pl.DataFrame(
+            {
+                "player_key": ["00-0000001"],
+                "full_name": ["Test Player"],
+                "normalized_name": ["test player"],
+                "position": ["RB"],
+                "team": ["KC"],
+                "source": ["test"],
+                "ingested_at": [__import__("datetime").datetime.now()],
+            }
+        ),
+    )
+    db.close()
+    client = TestClient(create_app(tmp_config), raise_server_exceptions=False)
+    return client, "00-0000001", "Test Player"
+
+
+@pytest.fixture
 def client_with_draft(tmp_config, db):
     save_state(db, build_fixture_draft(picks_made=41, slot=7))
     db.close()
@@ -77,6 +101,57 @@ class TestErrors:
         assert client.get("/api/board").status_code == 409
 
 
+class TestManualPicks:
+    """Swipe-to-draft and its undo, over the same store the CLI writes to."""
+
+    def _start(self, client) -> None:
+        response = client.post("/api/draft/start", json={"slot": 7, "draft_id": "api-manual"})
+        assert response.status_code == 200
+
+    def test_start_then_record_then_undo(self, client_with_data):
+        client, key, name = client_with_data
+        self._start(client)
+        recorded = client.post("/api/pick", json={"player_key": key, "draft_id": "api-manual"})
+        assert recorded.status_code == 200
+        body = recorded.json()
+        assert body["recorded"]["pick_label"] == "1.01"
+        assert body["picks_made"] == 1
+
+        undone = client.post("/api/undo", json={"draft_id": "api-manual"})
+        assert undone.status_code == 200
+        assert undone.json()["removed"]["name"] == name
+        assert undone.json()["picks_made"] == 0
+
+    def test_recording_the_same_player_twice_is_refused(self, client_with_data):
+        client, key, _ = client_with_data
+        self._start(client)
+        client.post("/api/pick", json={"player_key": key, "draft_id": "api-manual"})
+        again = client.post("/api/pick", json={"player_key": key, "draft_id": "api-manual"})
+        assert again.status_code == 409
+        assert "already been drafted" in again.json()["detail"]
+
+    def test_unknown_player_key(self, client_with_data):
+        client, _, _ = client_with_data
+        self._start(client)
+        response = client.post("/api/pick", json={"player_key": "nope", "draft_id": "api-manual"})
+        assert response.status_code == 404
+
+    def test_pick_without_a_draft(self, client):
+        assert client.post("/api/pick", json={"player_key": "x"}).status_code == 409
+
+    def test_pick_needs_a_key_or_a_name(self, client_with_data):
+        client, _, _ = client_with_data
+        self._start(client)
+        assert client.post("/api/pick", json={"draft_id": "api-manual"}).status_code == 422
+
+    def test_start_requires_a_slot_in_range(self, client):
+        assert client.post("/api/draft/start", json={"slot": 99}).status_code == 422
+
+    def test_undo_on_an_empty_draft(self, client):
+        client.post("/api/draft/start", json={"slot": 7, "draft_id": "api-manual"})
+        assert client.post("/api/undo", json={"draft_id": "api-manual"}).json()["removed"] is None
+
+
 class TestOnClock:
     def test_returns_the_five_areas(self, client_with_draft):
         response = client_with_draft.post(
@@ -112,13 +187,21 @@ class TestPage:
     def test_dashboard_is_served(self, client):
         response = client.get("/")
         assert response.status_code == 200
-        assert "I'M ON THE CLOCK" in response.text
+        assert "ANALYSE PICK" in response.text
 
     def test_page_contains_all_five_areas(self, client):
         text = client.get("/").text
         for heading in ("On the clock", "Who makes it back to me?", "What if I take",
                         "Best available", "My roster"):
             assert heading in text
+
+    def test_page_is_mobile_first(self, client):
+        """The clock does not wait for you to find a laptop."""
+        text = client.get("/").text
+        assert 'name="viewport"' in text
+        assert "viewport-fit=cover" in text
+        assert "safe-area-inset-bottom" in text          # notch-safe action bar
+        assert "@media(min-width:760px)" in text          # scales up, not down
 
     def test_page_has_no_external_requests(self, client):
         """Local-first: the page must not phone anywhere."""

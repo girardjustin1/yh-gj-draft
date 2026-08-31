@@ -42,6 +42,19 @@ class OnClockRequest(BaseModel):
     draft_id: str | None = None
 
 
+class PickRequest(BaseModel):
+    """Record a selection from the interface — the swipe-to-draft path."""
+
+    player_key: str | None = None
+    name: str | None = None
+    draft_id: str | None = None
+
+
+class StartDraftRequest(BaseModel):
+    slot: int | None = Field(None, ge=1, le=32)
+    draft_id: str = "manual-draft"
+
+
 class CompareRequest(BaseModel):
     player_keys: list[str] = Field(min_length=2, max_length=6)
     refresh: bool = False
@@ -155,6 +168,116 @@ def create_app(cfg: AppConfig | None = None) -> FastAPI:
                 cfg, db, draft_id=request.draft_id, refresh=request.refresh
             )
             return compare_picks(analysis, request.player_keys)
+
+    @app.post("/api/pick")
+    def record(request: PickRequest) -> dict[str, Any]:
+        """Mark a player drafted by hand.
+
+        The offline path: leagues on platforms we cannot read live, in-person drafts, or
+        an API outage. A pick recorded here is indistinguishable downstream from a synced
+        one.
+        """
+        from .. import queries
+        from ..draft.store import load_state, record_pick
+
+        cfg = config_of()
+        with connect(cfg.paths.db_path) as db:
+            state = load_state(db, request.draft_id)
+            if state is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="No draft in progress. Start one first.",
+                )
+            player_key, name, position, team = request.player_key, request.name, None, None
+            if player_key is None:
+                if not request.name:
+                    raise HTTPException(status_code=422, detail="Give a player_key or a name.")
+                match = queries.resolve_one(db, request.name)
+                if match is None:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Could not resolve {request.name!r} to exactly one player.",
+                    )
+                player_key, name = match["player_key"], match["full_name"]
+                position, team = match["position"], match["team"]
+            else:
+                row = queries.get_player(db, player_key)
+                if row is None:
+                    raise HTTPException(status_code=404, detail="Unknown player_key.")
+                name, position, team = row["full_name"], row["position"], row["team"]
+
+            try:
+                state = record_pick(db, state, player_key, name, position, team)
+            except ValueError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+            last = state.picks[-1]
+            return {
+                "recorded": {
+                    "overall": last.overall,
+                    "pick_label": state.board.label(last.overall),
+                    "slot": last.slot,
+                    "name": last.player_name,
+                    "position": last.position,
+                    "was_ours": last.slot == state.my_slot,
+                },
+                "picks_made": state.picks_made,
+                "is_my_pick": state.is_my_pick,
+                "picks_until_my_turn": state.picks_until_my_turn,
+                "pick_label": state.pick_label,
+            }
+
+    @app.post("/api/undo")
+    def undo(request: PickRequest) -> dict[str, Any]:
+        """Remove the most recently recorded selection."""
+        from ..draft.store import load_state, undo_pick
+
+        cfg = config_of()
+        with connect(cfg.paths.db_path) as db:
+            state = load_state(db, request.draft_id)
+            if state is None:
+                raise HTTPException(status_code=409, detail="No draft in progress.")
+            removed = undo_pick(db, state)
+            return {
+                "removed": (
+                    {"name": removed.player_name, "overall": removed.overall}
+                    if removed else None
+                ),
+                "picks_made": state.picks_made,
+                "pick_label": state.pick_label,
+                "is_my_pick": state.is_my_pick,
+            }
+
+    @app.post("/api/draft/start")
+    def start_draft(request: StartDraftRequest) -> dict[str, Any]:
+        """Begin an empty draft to fill in by hand."""
+        from ..draft.store import create_manual_draft
+
+        cfg = config_of()
+        league = cfg.league
+        if request.slot is not None:
+            league = league.model_copy(
+                update={"draft": league.draft.model_copy(update={"slot": request.slot})}
+            )
+        if league.draft.slot is None:
+            raise HTTPException(
+                status_code=422,
+                detail="A draft slot is required. Pass slot, or set draft.slot in league.yaml.",
+            )
+        if league.draft.slot > league.teams:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Slot {league.draft.slot} exceeds {league.teams} teams.",
+            )
+        with connect(cfg.paths.db_path) as db:
+            state = create_manual_draft(db, league, draft_id=request.draft_id)
+        return {
+            "draft_id": state.draft_id,
+            "teams": state.board.teams,
+            "rounds": state.board.rounds,
+            "my_slot": state.my_slot,
+            "pick_label": state.pick_label,
+        }
 
     @app.get("/api/board")
     def board(limit: int = 60, position: str | None = None) -> dict[str, Any]:

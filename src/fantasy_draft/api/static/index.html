@@ -2,535 +2,577 @@
 <html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Fantasy Draft AI</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0d1117">
+<title>Draft AI</title>
 <style>
-/* Designed for a 30-90 second clock: the recommendation must be readable in two
-   seconds, everything else is support. Colour is used only where it carries meaning
-   (urgency, holes in the lineup), never for decoration. */
+/* Mobile-first. You are on a 30-90 second clock, holding a phone, one-handed.
+   The recommendation must be readable without scrolling; every action must sit in the
+   lower-thumb zone; nothing important may hide behind a horizontal scroll.
+   The layout widens to two and three columns on larger screens. */
 :root{
-  --bg:#0d1117; --panel:#151b23; --panel-2:#1c232c; --line:#2a323d;
-  --text:#e6edf3; --dim:#8b949e; --dimmer:#6e7681;
-  --accent:#4493f8; --good:#3fb950; --warn:#d29922; --bad:#f85149;
-  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --bg:#0d1117; --panel:#161c24; --panel-2:#1d2530; --line:#2a323d; --line-2:#39424e;
+  --text:#e9eff5; --dim:#93a1b0; --dimmer:#6e7b89;
+  --accent:#4c9dfa; --good:#3fb950; --warn:#e3a72c; --bad:#f85149;
+  --qb:#f0736a; --rb:#4bbf7a; --wr:#5aa9f5; --te:#c586e0;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
+  --safe-b:env(safe-area-inset-bottom,0px);
 }
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 var(--sans);}
-button{font:inherit;cursor:pointer}
-.wrap{max-width:1500px;margin:0 auto;padding:16px}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.45 var(--sans);-webkit-text-size-adjust:100%}
+body{padding-bottom:calc(78px + var(--safe-b))}
+button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
+.wrap{max-width:1400px;margin:0 auto;padding:8px}
 
-/* ---- header ---- */
-header{display:flex;align-items:center;gap:16px;flex-wrap:wrap;
-  padding:12px 16px;background:var(--panel);border:1px solid var(--line);border-radius:10px}
-.brand{font-weight:700;letter-spacing:-.2px}
-.meta{color:var(--dim);font-size:12.5px}
-.meta b{color:var(--text);font-weight:600}
-.spacer{flex:1}
-.pill{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;
-  font-size:11.5px;background:var(--panel-2);border:1px solid var(--line);color:var(--dim)}
-.pill.ok{color:var(--good);border-color:#1f4b2a}
-.pill.bad{color:var(--bad);border-color:#5c2626}
-.pill.warn{color:var(--warn);border-color:#5c4a1a}
-.dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+/* ---------- sticky context bar ---------- */
+.topbar{position:sticky;top:0;z-index:30;background:rgba(13,17,23,.94);
+  backdrop-filter:saturate(160%) blur(12px);border-bottom:1px solid var(--line);
+  padding:8px 12px;display:flex;align-items:center;gap:10px}
+.picknow{font-family:var(--mono);font-size:19px;font-weight:750;letter-spacing:-.5px;line-height:1}
+.pickmeta{font-size:11px;color:var(--dim);margin-top:2px;white-space:nowrap}
+.pickmeta b{color:var(--text)}
+.topbar .grow{flex:1;min-width:0}
+.chip{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:999px;
+  font-size:10.5px;background:var(--panel-2);border:1px solid var(--line);color:var(--dim);
+  white-space:nowrap}
+.chip.ok{color:var(--good);border-color:#22502e}
+.chip.warn{color:var(--warn);border-color:#5c4a1a}
+.chip.bad{color:var(--bad);border-color:#5c2626}
+.dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
+.iconbtn{width:38px;height:38px;border-radius:10px;background:var(--panel-2);
+  border:1px solid var(--line);display:grid;place-items:center;font-size:16px;flex:none}
+.iconbtn:active{background:var(--line)}
 
-#clockBtn{background:var(--accent);color:#06121f;border:0;border-radius:8px;
-  padding:11px 20px;font-weight:750;letter-spacing:.3px;font-size:14px}
-#clockBtn:hover{filter:brightness(1.1)}
-#clockBtn:disabled{opacity:.55;cursor:progress}
+/* ---------- panels ---------- */
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+  overflow:hidden;margin-top:10px}
+.card>h2{margin:0;padding:9px 13px;font-size:10.5px;letter-spacing:.85px;
+  text-transform:uppercase;color:var(--dim);border-bottom:1px solid var(--line);font-weight:700;
+  display:flex;align-items:center;gap:8px}
+.card>h2 .n{width:17px;height:17px;border-radius:5px;background:var(--panel-2);
+  display:grid;place-items:center;font-size:10px;color:var(--dim)}
+.card>.body{padding:13px}
+.card.hero{border-color:#2f5480;background:linear-gradient(180deg,#18222f,#161c24)}
 
-/* ---- layout ---- */
-.grid{display:grid;gap:14px;margin-top:14px}
-.cols-2{grid-template-columns:1fr 1fr}
-.cols-roster{grid-template-columns:minmax(280px,340px) 1fr}
-@media(max-width:1050px){.cols-2,.cols-roster{grid-template-columns:1fr}}
+/* ---------- 1. the recommendation ---------- */
+.recname{font-size:27px;font-weight:800;letter-spacing:-.7px;line-height:1.1}
+.recsub{color:var(--dim);font-size:12.5px;margin-top:4px;display:flex;gap:7px;
+  align-items:center;flex-wrap:wrap}
+.posdot{display:inline-block;padding:1.5px 7px;border-radius:5px;font-size:10.5px;
+  font-weight:800;color:#08121c;letter-spacing:.3px}
+.pos-QB{background:var(--qb)}.pos-RB{background:var(--rb)}
+.pos-WR{background:var(--wr)}.pos-TE{background:var(--te)}
+.pos-K,.pos-DST{background:var(--dimmer)}
+.statrow{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:13px}
+.statbox{background:var(--panel-2);border-radius:10px;padding:8px 4px;text-align:center}
+.statbox .v{font-family:var(--mono);font-size:19px;font-weight:750;line-height:1.15}
+.statbox .k{font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:.4px;
+  margin-top:3px;line-height:1.2}
+.reason{margin-top:12px;font-size:13px;line-height:1.6;color:#c5d2de}
+.reason.collapsed{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;
+  overflow:hidden}
+.morebtn{margin-top:6px;font-size:12px;color:var(--accent);font-weight:600}
+.altrow{display:flex;gap:7px;flex-wrap:wrap;margin-top:11px}
+.altchip{padding:6px 10px;border-radius:9px;background:var(--panel-2);
+  border:1px solid var(--line);font-size:12.5px;display:flex;gap:6px;align-items:center}
+.altchip b{font-family:var(--mono)}
 
-.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
-.card>h2{margin:0;padding:9px 14px;font-size:11px;letter-spacing:.9px;text-transform:uppercase;
-  color:var(--dim);background:var(--panel-2);border-bottom:1px solid var(--line);font-weight:650}
-.card>.body{padding:14px}
-.card.hero{border-color:#2d4a6b}
+/* ---------- positional value bars (from the reference app) ---------- */
+.vorlegend{font-size:10.5px;color:var(--dim);display:flex;justify-content:space-between;
+  margin-bottom:9px}
+.vorrow{display:grid;grid-template-columns:34px 1fr auto;gap:9px;align-items:center;
+  margin-bottom:7px}
+.vorlabel{font-size:11px;font-weight:800;text-align:center;padding:3px 0;border-radius:6px;
+  color:#08121c}
+.vortrack{height:22px;background:var(--panel-2);border-radius:7px;overflow:hidden}
+.vortrack>span{display:block;height:100%;border-radius:7px;transition:width .35s ease}
+.vornum{font-family:var(--mono);font-size:12px;color:var(--dim);min-width:52px;text-align:right}
 
-/* ---- 1. on the clock ---- */
-.clockline{display:flex;gap:26px;flex-wrap:wrap;align-items:baseline;margin-bottom:12px}
-.pick{font-family:var(--mono);font-size:30px;font-weight:700;letter-spacing:-1px}
-.pick small{font-size:12px;color:var(--dim);font-weight:400;font-family:var(--sans)}
-.nextpick{color:var(--dim);font-size:13.5px}
-.nextpick b{color:var(--text);font-family:var(--mono)}
-.rec{display:flex;gap:22px;align-items:center;flex-wrap:wrap;
-  padding:14px;background:var(--panel-2);border-radius:9px;border:1px solid var(--line)}
-.recname{font-size:29px;font-weight:750;letter-spacing:-.6px;line-height:1.15}
-.recpos{color:var(--dim);font-size:13px;margin-top:2px}
-.stats{display:flex;gap:22px;margin-left:auto;flex-wrap:wrap}
-.stat{text-align:right;min-width:74px}
-.stat .v{font-family:var(--mono);font-size:23px;font-weight:700;line-height:1.1}
-.stat .k{font-size:10.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;margin-top:3px}
-.reason{margin-top:12px;color:#c9d5e0;font-size:13.5px;line-height:1.6}
-.alts{margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-.alt{padding:5px 11px;border-radius:7px;background:var(--panel-2);border:1px solid var(--line);
-  font-size:12.5px;cursor:pointer}
-.alt:hover{border-color:var(--accent)}
-.alt b{font-family:var(--mono)}
+/* ---------- 4. survival ---------- */
+.survrow{display:grid;grid-template-columns:1fr 44px;gap:10px;align-items:center;padding:7px 0}
+.survrow+.survrow{border-top:1px solid #1d242d}
+.survname{font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.bar{height:6px;border-radius:3px;background:#242c36;overflow:hidden;margin-top:5px}
+.bar>span{display:block;height:100%;border-radius:3px}
+.survpct{font-family:var(--mono);font-size:14.5px;font-weight:750;text-align:right}
 
-/* ---- 4. who makes it back ---- */
-.survrow{display:grid;grid-template-columns:1fr 46px;gap:10px;align-items:center;
-  padding:6px 0;border-bottom:1px solid #1e252e}
-.survrow:last-child{border-bottom:0}
-.survname{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.survname i{color:var(--dim);font-style:normal;font-size:11.5px}
-.bar{height:7px;border-radius:4px;background:#232b35;overflow:hidden;margin-top:4px}
-.bar>span{display:block;height:100%;border-radius:4px}
-.survpct{font-family:var(--mono);font-size:14px;text-align:right;font-weight:650}
+/* ---------- 5. what if ---------- */
+.wi{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:10px 11px;
+  border-radius:11px;background:var(--panel-2);border:1px solid var(--line);margin-bottom:7px}
+.wi.best{border-color:#2f6b3f;background:#152218}
+.wi .n{font-weight:650;font-size:13.5px}
+.wi .p{color:var(--dim);font-size:11px;font-family:var(--mono);margin-top:3px}
+.wi .c{font-family:var(--mono);font-size:18px;font-weight:750;text-align:right}
+.wi .d{font-size:10px;color:var(--dim);text-align:right}
 
-/* ---- 5. what if ---- */
-.whatif{display:grid;gap:9px}
-.wi{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;
-  padding:9px 11px;border-radius:8px;background:var(--panel-2);border:1px solid var(--line)}
-.wi.best{border-color:#2a5c36;background:#131f18}
-.wi .n{font-weight:620;font-size:13.5px}
-.wi .p{color:var(--dim);font-size:11.5px;font-family:var(--mono);margin-top:2px}
-.wi .c{font-family:var(--mono);font-size:19px;font-weight:700;text-align:right}
-.wi .d{font-size:11px;color:var(--dim);text-align:right;font-family:var(--mono)}
-
-/* ---- 2. best available ---- */
-.tools{display:flex;gap:6px;padding:9px 14px;border-bottom:1px solid var(--line);
-  flex-wrap:wrap;align-items:center;background:var(--panel)}
-.tab{padding:4px 12px;border-radius:6px;background:transparent;border:1px solid var(--line);
-  color:var(--dim);font-size:12.5px}
-.tab.on{background:var(--accent);border-color:var(--accent);color:#06121f;font-weight:650}
+/* ---------- 2. player list ---------- */
+.tabs{display:flex;gap:4px;padding:9px 11px 0}
+.tab2{flex:1;padding:8px 0;text-align:center;font-size:12.5px;font-weight:650;
+  color:var(--dim);border-bottom:2px solid transparent}
+.tab2.on{color:var(--text);border-bottom-color:var(--accent)}
+.filters{display:flex;gap:6px;overflow-x:auto;padding:10px 11px;scrollbar-width:none;
+  -webkit-overflow-scrolling:touch}
+.filters::-webkit-scrollbar{display:none}
+.pillbtn{padding:6px 13px;border-radius:999px;background:var(--panel-2);
+  border:1px solid var(--line);color:var(--dim);font-size:12.5px;white-space:nowrap;flex:none}
+.pillbtn.on{background:var(--accent);border-color:var(--accent);color:#06121f;font-weight:700}
+.sortbar{display:flex;gap:8px;align-items:center;padding:0 11px 10px}
 select{background:var(--panel-2);color:var(--text);border:1px solid var(--line);
-  border-radius:6px;padding:4px 8px;font-size:12.5px}
-.scroll{max-height:460px;overflow:auto}
-table{width:100%;border-collapse:collapse;font-size:12.5px}
-th{position:sticky;top:0;background:var(--panel-2);text-align:right;padding:7px 9px;
-  font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--dim);
-  border-bottom:1px solid var(--line);white-space:nowrap;font-weight:650;z-index:1}
-th:nth-child(-n+3),td:nth-child(-n+3){text-align:left}
-td{padding:6px 9px;border-bottom:1px solid #1a212a;text-align:right;
-  font-family:var(--mono);white-space:nowrap}
-td.name{font-family:var(--sans);font-weight:560;max-width:190px;overflow:hidden;
-  text-overflow:ellipsis;cursor:pointer}
-td.name:hover{color:var(--accent)}
-tbody tr:hover{background:#1a212a}
-tr.picked td{opacity:.45}
-.chk{accent-color:var(--accent)}
+  border-radius:9px;padding:7px 9px;font-size:12.5px;flex:1;min-width:0}
 
-/* ---- 3. roster ---- */
-.slot{display:grid;grid-template-columns:52px 1fr;gap:9px;align-items:center;
-  padding:6px 9px;border-radius:7px;margin-bottom:4px;background:var(--panel-2)}
-.slot.empty{background:transparent;border:1px dashed #39424e}
-.slot .lbl{font-family:var(--mono);font-size:11px;color:var(--dim);font-weight:650}
-.slot .who{font-size:13px}
-.slot.empty .who{color:var(--dimmer);font-style:italic}
-.benchhead{font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--dim);
-  margin:12px 0 6px}
+.plist{list-style:none;margin:0;padding:0}
+.prow{position:relative;overflow:hidden;border-top:1px solid #1c232c}
+.pinner{display:grid;grid-template-columns:1fr auto auto;gap:9px;align-items:center;
+  padding:10px 11px;background:var(--panel);transition:transform .18s ease;
+  touch-action:pan-y}
+.pmain{min-width:0}
+.pname{font-size:14.5px;font-weight:650;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.pmeta{font-size:11px;color:var(--dim);margin-top:3px;display:flex;gap:6px;align-items:center}
+.pnums{text-align:right;font-family:var(--mono);line-height:1.25}
+.pnums .a{font-size:15px;font-weight:750}
+.pnums .b{font-size:10.5px;color:var(--dim)}
+.gonebadge{min-width:44px;text-align:center;font-family:var(--mono);font-size:12.5px;
+  font-weight:750;padding:5px 4px;border-radius:8px;background:var(--panel-2)}
+.swipehint{position:absolute;inset:0;display:flex;align-items:center;justify-content:flex-end;
+  padding-right:16px;background:linear-gradient(90deg,transparent,#5c2626);
+  font-size:12px;font-weight:700;color:#ffd9d9;pointer-events:none;opacity:0}
+.prow.armed .swipehint{opacity:1}
+.prow.taken .pinner{opacity:.4}
 
-/* ---- environment ---- */
-.envtable{width:100%;font-size:12.5px;border-collapse:collapse}
-.envtable td{padding:5px 8px;border-bottom:1px solid #1a212a}
-.envtable td:first-child{font-weight:650;font-family:var(--sans)}
-.minibar{height:6px;border-radius:3px;background:#232b35;overflow:hidden;min-width:70px}
-.minibar>span{display:block;height:100%}
+/* ---------- 3. roster ---------- */
+.slot{display:grid;grid-template-columns:48px 1fr;gap:9px;align-items:center;
+  padding:8px 10px;border-radius:9px;margin-bottom:5px;background:var(--panel-2)}
+.slot.empty{background:transparent;border:1px dashed var(--line-2)}
+.slot .lbl{font-family:var(--mono);font-size:10.5px;color:var(--dim);font-weight:700;
+  text-align:center}
+.slot.empty .who{color:var(--dimmer);font-style:italic;font-size:13px}
 
-.muted{color:var(--dim);font-size:12px}
-.note{margin-top:10px;padding:8px 11px;border-radius:7px;background:#1d1a12;
-  border:1px solid #3d3418;color:#d7c98f;font-size:12px;line-height:1.55}
-.err{background:#2a1315;border-color:#5c2626;color:#f0b6b6}
-.empty{padding:26px 14px;text-align:center;color:var(--dim);font-size:13px}
-kbd{font-family:var(--mono);background:var(--panel-2);border:1px solid var(--line);
-  border-radius:4px;padding:1px 5px;font-size:11px}
+/* ---------- bottom action bar ---------- */
+.actionbar{position:fixed;left:0;right:0;bottom:0;z-index:40;
+  padding:9px 12px calc(9px + var(--safe-b));
+  background:rgba(13,17,23,.96);backdrop-filter:saturate(160%) blur(14px);
+  border-top:1px solid var(--line);display:flex;gap:9px}
+#clockBtn{flex:1;background:var(--accent);color:#06121f;border-radius:13px;
+  padding:15px;font-weight:800;letter-spacing:.4px;font-size:15px}
+#clockBtn:active{transform:scale(.985)}
+#clockBtn:disabled{opacity:.5}
+#undoBtn{width:56px;border-radius:13px;background:var(--panel-2);
+  border:1px solid var(--line);font-size:13px;font-weight:650}
+
+/* ---------- misc ---------- */
+.note{margin-top:9px;padding:9px 11px;border-radius:10px;background:#1e1b12;
+  border:1px solid #3f3619;color:#dccd93;font-size:12px;line-height:1.55}
+.note.err{background:#2a1315;border-color:#5c2626;color:#f2bcbc}
+.empty{padding:26px 13px;text-align:center;color:var(--dim);font-size:13px}
+.muted{color:var(--dim);font-size:11.5px}
+.toast{position:fixed;left:50%;transform:translateX(-50%);
+  bottom:calc(92px + var(--safe-b));z-index:60;
+  background:var(--panel-2);border:1px solid var(--line-2);border-radius:11px;
+  padding:11px 16px;font-size:13px;font-weight:600;box-shadow:0 8px 26px rgba(0,0,0,.5);
+  opacity:0;pointer-events:none;transition:opacity .18s;max-width:90vw;text-align:center}
+.toast.show{opacity:1}
+.scrollx{overflow-x:auto;-webkit-overflow-scrolling:touch}
+
+/* ---------- wider screens ---------- */
+@media(min-width:760px){
+  .wrap{padding:12px}
+  body{padding-bottom:16px}
+  .actionbar{position:sticky;top:0;bottom:auto;background:none;backdrop-filter:none;
+    border:0;border-radius:0;padding:0;margin-top:10px}
+  #clockBtn{padding:13px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:start}
+  .grid2>.card{margin-top:10px}
+  .recname{font-size:32px}
+}
+@media(min-width:1120px){
+  .grid3{display:grid;grid-template-columns:1.15fr 1fr;gap:10px;align-items:start}
+  .grid3>.card{margin-top:10px}
+}
 </style>
 </head>
 <body>
+
+<div class="topbar">
+  <div class="grow">
+    <div class="picknow" id="pickNow">—</div>
+    <div class="pickmeta" id="pickMeta">press analyse to begin</div>
+  </div>
+  <span class="chip" id="providerChip"><span class="dot"></span><span>…</span></span>
+  <button class="iconbtn" id="refreshBtn" title="Re-analyse">↻</button>
+</div>
+
 <div class="wrap">
-
-  <header>
-    <div>
-      <div class="brand">Fantasy Draft AI</div>
-      <div class="meta" id="leagueMeta">loading…</div>
-    </div>
-    <div class="spacer"></div>
-    <span class="pill" id="providerPill"><span class="dot"></span><span>provider</span></span>
-    <span class="pill" id="syncPill" hidden><span class="dot"></span><span>sync</span></span>
-    <button id="clockBtn">I'M ON THE CLOCK</button>
-  </header>
-
   <div id="alerts"></div>
 
-  <!-- 1 -->
-  <div class="grid">
+  <div class="grid3">
     <section class="card hero">
-      <h2>1 · On the clock</h2>
+      <h2><span class="n">1</span> On the clock</h2>
       <div class="body" id="clockBody">
-        <div class="empty">Press <kbd>I'M ON THE CLOCK</kbd> to analyse the current pick.</div>
+        <div class="empty">Tap <b>ANALYSE PICK</b> below.</div>
       </div>
+    </section>
+
+    <section class="card">
+      <h2>Positional value over replacement</h2>
+      <div class="body" id="vorBody"><div class="empty">—</div></div>
     </section>
   </div>
 
-  <!-- 4 + 5 -->
-  <div class="grid cols-2">
+  <div class="grid2">
     <section class="card">
-      <h2>4 · Who makes it back to me?</h2>
+      <h2><span class="n">4</span> Who makes it back to me?</h2>
       <div class="body" id="survivalBody"><div class="empty">—</div></div>
     </section>
+
     <section class="card">
-      <h2>5 · What if I take…</h2>
+      <h2><span class="n">5</span> What if I take…</h2>
       <div class="body" id="whatIfBody"><div class="empty">—</div></div>
     </section>
   </div>
 
-  <!-- 2 -->
-  <div class="grid">
-    <section class="card">
-      <h2>2 · Best available</h2>
-      <div class="tools">
-        <span id="posTabs"></span>
-        <span class="spacer"></span>
-        <label class="muted">sort
-          <select id="sortSel">
-            <option value="draft_now">Draft Now</option>
-            <option value="player_score">Player Score</option>
-            <option value="vbd">VBD</option>
-            <option value="adp_value">ADP Value</option>
-            <option value="scarcity">Scarcity</option>
-            <option value="probability_gone">Probability Gone</option>
-            <option value="ceiling">Ceiling</option>
-            <option value="floor">Floor</option>
-            <option value="projection">Projection</option>
-          </select>
-        </label>
-      </div>
-      <div class="scroll"><table id="boardTable">
-        <thead><tr>
-          <th></th><th>Player</th><th>Pos</th><th>Tm</th><th>Tier</th>
-          <th>Draft&nbsp;Now</th><th>Player</th><th>Proj</th><th>VBD</th>
-          <th>ADP</th><th>ADP&nbsp;Val</th><th>Gone</th>
-          <th>Floor</th><th>Ceil</th><th>Shape</th>
-        </tr></thead>
-        <tbody><tr><td colspan="15" class="empty">—</td></tr></tbody>
-      </table></div>
-      <div class="body muted" id="compareHint" style="padding:9px 14px">
-        Tick two players to compare them across both picks.
-      </div>
-    </section>
-  </div>
+  <section class="card">
+    <h2><span class="n">2</span> Best available</h2>
+    <div class="tabs" id="tabs"></div>
+    <div class="filters" id="posFilters"></div>
+    <div class="sortbar">
+      <select id="sortSel">
+        <option value="draft_now">Sort · Draft Now</option>
+        <option value="player_score">Sort · Player Score</option>
+        <option value="probability_gone">Sort · Most likely gone</option>
+        <option value="vbd">Sort · VBD</option>
+        <option value="adp">Sort · ADP</option>
+        <option value="adp_value">Sort · ADP value</option>
+        <option value="ceiling">Sort · Ceiling</option>
+        <option value="floor">Sort · Floor</option>
+        <option value="projection">Sort · Projection</option>
+      </select>
+    </div>
+    <ul class="plist" id="plist"><li class="empty">—</li></ul>
+    <div class="body muted" id="listHint"></div>
+  </section>
 
-  <!-- 3 + environment -->
-  <div class="grid cols-roster">
-    <section class="card">
-      <h2>3 · My roster</h2>
-      <div class="body" id="rosterBody"><div class="empty">—</div></div>
-    </section>
-    <section class="card">
-      <h2>Draft environment</h2>
-      <div class="body" id="envBody"><div class="empty">—</div></div>
-    </section>
-  </div>
+  <section class="card">
+    <h2><span class="n">3</span> My roster</h2>
+    <div class="body" id="rosterBody"><div class="empty">—</div></div>
+  </section>
 
-  <div class="grid"><section class="card"><h2>Data health</h2>
-    <div class="body" id="healthBody"><div class="empty">—</div></div>
-  </section></div>
-
+  <section class="card">
+    <h2>Draft environment &amp; data health</h2>
+    <div class="body" id="envBody"><div class="empty">—</div></div>
+  </section>
 </div>
+
+<div class="actionbar">
+  <button id="clockBtn">ANALYSE PICK</button>
+  <button id="undoBtn" title="Undo last recorded pick">Undo</button>
+</div>
+<div class="toast" id="toast"></div>
 
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
 const POSITIONS = ["ALL","QB","RB","WR","TE"];
-let LATEST = null, POS = "ALL", SORT = "draft_now", SELECTED = new Set();
+const TABS = [["available","Available"],["roster","My team"],["gone","Drafted"]];
+let LATEST=null, POS="ALL", SORT="draft_now", TAB="available", SELECTED=new Set(), BUSY=false;
 
-const fmt = (v, d = 1) => (v === null || v === undefined) ? "–" : Number(v).toFixed(d);
-const pct = (v) => (v === null || v === undefined) ? "–" : Math.round(v * 100) + "%";
-const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c =>
-  ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+const fmt=(v,d=1)=>(v==null)?"–":Number(v).toFixed(d);
+const pct=(v)=>(v==null)?"–":Math.round(v*100)+"%";
+const esc=(s)=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const posClass=(p)=>"pos-"+(["QB","RB","WR","TE"].includes(p)?p:"K");
 
-/* Urgency colour: red = going soon. This is the one place colour carries meaning on the
-   board, so it is not used anywhere it would compete. */
-function urgencyColor(goneProb) {
-  if (goneProb === null || goneProb === undefined) return "var(--dimmer)";
-  if (goneProb >= 0.7) return "var(--bad)";
-  if (goneProb >= 0.4) return "var(--warn)";
+/* Colour carries one meaning only: urgency. */
+function urgency(gone){
+  if(gone==null) return "var(--dimmer)";
+  if(gone>=.7) return "var(--bad)";
+  if(gone>=.4) return "var(--warn)";
   return "var(--good)";
 }
-
-async function api(path, body) {
-  const res = await fetch(path, body ? {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-  } : undefined);
-  const text = await res.text();
-  let data; try { data = JSON.parse(text); } catch { data = { detail: text }; }
-  if (!res.ok) throw new Error(data.detail || data.error || `HTTP ${res.status}`);
+function toast(msg){
+  const t=$("toast"); t.textContent=msg; t.classList.add("show");
+  clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove("show"),2200);
+}
+async function api(path,body){
+  const res=await fetch(path, body?{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify(body)}:undefined);
+  const text=await res.text();
+  let data; try{data=JSON.parse(text);}catch{data={detail:text};}
+  if(!res.ok) throw new Error(data.detail||data.error||("HTTP "+res.status));
   return data;
 }
-
-function alert_(html, cls = "note") {
-  $("alerts").insertAdjacentHTML("beforeend", `<div class="${cls}">${html}</div>`);
-}
-function clearAlerts() { $("alerts").innerHTML = ""; }
+function alert_(html,cls="note"){ $("alerts").insertAdjacentHTML("beforeend",`<div class="${cls}">${html}</div>`); }
 
 /* ---------- config ---------- */
-async function loadConfig() {
-  try {
-    const c = await api("/api/config");
-    const L = c.league;
-    $("leagueMeta").innerHTML =
-      `<b>${esc(L.name)}</b> · ${L.teams}-team ${esc(L.scoring_type)}` +
-      (L.is_superflex ? " Superflex" : "") +
-      ` · ${L.rounds} rounds · slot <b>${L.slot ?? "not set"}</b>`;
-    const p = c.provider, pill = $("providerPill");
-    pill.className = "pill " + (p.connected ? "ok" : (p.implemented ? "warn" : "bad"));
-    pill.lastElementChild.textContent = p.platform + (p.connected ? " · connected" : " · not connected");
-    pill.title = p.detail;
-    if (!L.slot) {
-      alert_("Your <b>draft slot</b> is not set, so snake maths cannot run. " +
-             "Set <code>draft.slot</code> in <code>config/league.yaml</code>, or run " +
-             "<code>ff draft sync</code> once the order is known.");
-    }
-    if (!p.implemented) alert_(esc(p.detail), "note err");
-  } catch (e) { alert_("Could not load config: " + esc(e.message), "note err"); }
+async function loadConfig(){
+  try{
+    const c=await api("/api/config"), L=c.league, p=c.provider;
+    const chip=$("providerChip");
+    chip.className="chip "+(p.connected?"ok":(p.implemented?"warn":"bad"));
+    chip.lastElementChild.textContent=p.platform;
+    chip.title=p.detail;
+    $("pickMeta").innerHTML=`${L.teams}-team ${esc(L.scoring_type)}${L.is_superflex?" SF":""} · slot <b>${L.slot??"?"}</b>`;
+    if(!L.slot) alert_("<b>Draft slot not set.</b> Snake maths needs it — set <code>draft.slot</code> in <code>config/league.yaml</code> or run <code>ff draft sync</code>.");
+    if(!p.implemented) alert_(esc(p.detail),"note err");
+  }catch(e){ alert_("Config failed: "+esc(e.message),"note err"); }
 }
 
-/* ---------- 1. on the clock ---------- */
-function renderClock(d) {
-  const o = d.on_the_clock, r = o.recommendation;
-  if (!r) { $("clockBody").innerHTML = `<div class="empty">No candidate could be scored.</div>`; return; }
-  const gone = r.probability_gone;
-  const alts = o.alternatives.map(a =>
-    `<span class="alt" data-key="${esc(a.player_key)}">${esc(a.name)} <i class="muted">${esc(a.position)}</i> <b>${fmt(a.draft_now)}</b></span>`
-  ).join("");
-
-  $("clockBody").innerHTML = `
-    <div class="clockline">
-      <div><div class="pick">${esc(o.pick_label)}</div><small>round ${o.round} · slot ${o.my_slot}</small></div>
-      <div class="nextpick">next pick <b>${esc(o.next_pick_label ?? "—")}</b><br>
-        ${o.picks_until_next !== null ? `<b>${o.picks_until_next}</b> picks away` : "last pick of the draft"}</div>
-      <div class="nextpick">strategy <b>${esc(o.strategy.current)}</b><br>
-        <span class="muted">${pct(o.strategy.confidence)} confident</span></div>
+/* ---------- 1 ---------- */
+function renderClock(d){
+  const o=d.on_the_clock, r=o.recommendation;
+  $("pickNow").textContent=o.pick_label;
+  $("pickMeta").innerHTML = o.next_pick_label
+    ? `next <b>${esc(o.next_pick_label)}</b> · <b>${o.picks_until_next}</b> picks away`
+    : "last pick of the draft";
+  if(!r){ $("clockBody").innerHTML=`<div class="empty">No candidate could be scored.</div>`; return; }
+  const gone=r.probability_gone;
+  $("clockBody").innerHTML=`
+    <div class="recname">${esc(r.name)}</div>
+    <div class="recsub">
+      <span class="posdot ${posClass(r.position)}">${esc(r.position)}</span>
+      <span>${esc(r.team??"")}</span>${r.bye_week?`<span>· bye ${r.bye_week}</span>`:""}
+      ${r.tier?`<span>· tier ${r.tier}</span>`:""}
+      <span>· ${esc(o.strategy.current)}</span>
     </div>
-    <div class="rec">
-      <div>
-        <div class="recname">${esc(r.name)}</div>
-        <div class="recpos">${esc(r.position)} · ${esc(r.team ?? "")}${r.bye_week ? " · bye " + r.bye_week : ""}${r.tier ? " · tier " + r.tier : ""}</div>
-      </div>
-      <div class="stats">
-        <div class="stat"><div class="v">${fmt(r.draft_now)}</div><div class="k">Draft Now</div></div>
-        <div class="stat"><div class="v">${fmt(r.player_score)}</div><div class="k">Player</div></div>
-        <div class="stat"><div class="v" style="color:${urgencyColor(gone)}">${pct(gone)}</div><div class="k">Gone by next</div></div>
-        <div class="stat"><div class="v">${pct(o.confidence)}</div><div class="k">Confidence</div></div>
-      </div>
+    <div class="statrow">
+      <div class="statbox"><div class="v">${fmt(r.draft_now)}</div><div class="k">Draft now</div></div>
+      <div class="statbox"><div class="v">${fmt(r.player_score)}</div><div class="k">Player</div></div>
+      <div class="statbox"><div class="v" style="color:${urgency(gone)}">${pct(gone)}</div><div class="k">Gone by next</div></div>
+      <div class="statbox"><div class="v">${pct(o.confidence)}</div><div class="k">Confidence</div></div>
     </div>
-    <div class="reason">${esc(o.reason)}</div>
-    ${alts ? `<div class="alts"><span class="muted">Alternatives:</span>${alts}</div>` : ""}`;
-
-  $("clockBody").querySelectorAll(".alt").forEach(el =>
-    el.onclick = () => { toggleSelect(el.dataset.key); });
+    <div class="reason collapsed" id="reasonText">${esc(o.reason)}</div>
+    <button class="morebtn" id="moreBtn">Why? ▾</button>
+    ${o.alternatives.length?`<div class="altrow">${o.alternatives.map(a=>
+      `<span class="altchip"><span class="posdot ${posClass(a.position)}">${esc(a.position)}</span>
+       ${esc(a.name)} <b>${fmt(a.draft_now)}</b></span>`).join("")}</div>`:""}`;
+  $("moreBtn").onclick=(e)=>{
+    const t=$("reasonText"); const c=t.classList.toggle("collapsed");
+    e.target.textContent=c?"Why? ▾":"Less ▴";
+  };
 }
 
-/* ---------- 4. who makes it back ---------- */
-function renderSurvival(d) {
-  const rows = d.who_makes_it_back;
-  if (!rows.length) {
-    $("survivalBody").innerHTML = `<div class="empty">No next pick — this is our last selection.</div>`;
-    return;
-  }
-  $("survivalBody").innerHTML = rows.map(r => {
-    const p = r.probability_available;
+/* ---------- positional value bars ---------- */
+function renderVor(d){
+  const env=d.draft_environment;
+  const rows=["QB","RB","WR","TE"].filter(p=>env[p]);
+  if(!rows.length){ $("vorBody").innerHTML=`<div class="empty">—</div>`; return; }
+  const max=Math.max(...rows.map(p=>env[p].scarcity),1);
+  $("vorBody").innerHTML=`
+    <div class="vorlegend"><span>Based on who is left + your roster</span><span>LOW → HIGH</span></div>
+    ${rows.map(p=>{
+      const e=env[p], w=Math.max(4,Math.round(100*e.scarcity/max));
+      return `<div class="vorrow">
+        <div class="vorlabel ${posClass(p)}">${p}</div>
+        <div class="vortrack"><span style="width:${w}%;background:var(--${p.toLowerCase()})"></span></div>
+        <div class="vornum">${fmt(e.expected_gone_before_next_pick,1)} gone</div>
+      </div>`;
+    }).join("")}
+    <div class="muted" style="margin-top:8px">Bar length is positional scarcity right now;
+    the number is how many are expected to go before your next pick.</div>`;
+}
+
+/* ---------- 4 ---------- */
+function renderSurvival(d){
+  const rows=d.who_makes_it_back;
+  if(!rows.length){ $("survivalBody").innerHTML=`<div class="empty">No next pick — last selection.</div>`; return; }
+  $("survivalBody").innerHTML=rows.slice(0,8).map(r=>{
+    const p=r.probability_available;
     return `<div class="survrow">
       <div>
-        <div class="survname">${esc(r.name)} <i>${esc(r.position)} · ${esc(r.team ?? "")}</i></div>
-        <div class="bar"><span style="width:${Math.round(p*100)}%;background:${urgencyColor(r.probability_gone)}"></span></div>
+        <div class="survname"><span class="posdot ${posClass(r.position)}">${esc(r.position)}</span>
+          ${esc(r.name)}</div>
+        <div class="bar"><span style="width:${Math.round(p*100)}%;background:${urgency(r.probability_gone)}"></span></div>
       </div>
-      <div class="survpct" style="color:${urgencyColor(r.probability_gone)}">${pct(p)}</div>
-    </div>`;
-  }).join("") +
-  `<div class="muted" style="margin-top:10px">Chance the player is still on the board at
-   <b>${esc(d.on_the_clock.next_pick_label ?? "—")}</b>, from opponent roster needs plus
-   ${d.simulation ? d.simulation.iterations.toLocaleString() + " simulations" : "the ADP model"}.</div>`;
+      <div class="survpct" style="color:${urgency(r.probability_gone)}">${pct(p)}</div>
+    </div>`;}).join("")+
+    `<div class="muted" style="margin-top:9px">Chance still on the board at
+     <b>${esc(d.on_the_clock.next_pick_label??"—")}</b>.</div>`;
 }
 
-/* ---------- 5. what if ---------- */
-function renderWhatIf(d) {
-  const rows = d.what_if;
-  if (!rows.length) {
-    $("whatIfBody").innerHTML = `<div class="empty">Run with simulation enabled to price both picks.</div>`;
-    return;
+/* ---------- 5 ---------- */
+function renderWhatIf(d){
+  const rows=d.what_if;
+  if(!rows.length){ $("whatIfBody").innerHTML=`<div class="empty">Simulation off.</div>`; return; }
+  $("whatIfBody").innerHTML=rows.map((r,i)=>`
+    <div class="wi ${i===0?"best":""}">
+      <div><div class="n">${esc(r.name)}</div>
+        <div class="p">${fmt(r.value_now)} + ${fmt(r.expected_next_value)} → ${esc(r.likely_next_position??"?")}</div></div>
+      <div><div class="c">${fmt(r.combined)}</div>
+        <div class="d">${i===0?"best path":fmt(r.delta_vs_best)}</div></div>
+    </div>`).join("")+
+    `<div class="muted">This pick plus the best player expected to survive to your next one.</div>`;
+}
+
+/* ---------- 2 ---------- */
+function renderTabs(){
+  $("tabs").innerHTML=TABS.map(([k,l])=>`<button class="tab2 ${k===TAB?"on":""}" data-tab="${k}">${l}</button>`).join("");
+  $("tabs").querySelectorAll(".tab2").forEach(b=>b.onclick=()=>{TAB=b.dataset.tab;renderTabs();renderList();});
+  $("posFilters").innerHTML=POSITIONS.map(p=>`<button class="pillbtn ${p===POS?"on":""}" data-pos="${p}">${p}</button>`).join("");
+  $("posFilters").querySelectorAll(".pillbtn").forEach(b=>b.onclick=()=>{POS=b.dataset.pos;renderTabs();renderList();});
+}
+
+function listRows(){
+  if(!LATEST) return [];
+  if(TAB==="roster"){
+    const r=LATEST.my_roster;
+    return [...r.starters,...r.bench].filter(s=>s.filled)
+      .map(s=>({name:s.name,position:s.position,team:s.team,player_key:s.player_key,slot:s.slot}));
   }
-  $("whatIfBody").innerHTML = `<div class="whatif">` + rows.map((r, i) => `
-    <div class="wi ${i === 0 ? "best" : ""}">
-      <div>
-        <div class="n">${esc(r.name)}</div>
-        <div class="p">${fmt(r.value_now)} now + ${fmt(r.expected_next_value)} at next pick
-          → likely ${esc(r.likely_next_position ?? "?")}</div>
-      </div>
-      <div>
-        <div class="c">${fmt(r.combined)}</div>
-        <div class="d">${i === 0 ? "best path" : fmt(r.delta_vs_best) }</div>
-      </div>
-    </div>`).join("") + `</div>
-    <div class="muted" style="margin-top:10px">Combined value of this pick plus the best
-    player expected to survive to our next one.</div>`;
-}
-
-/* ---------- 2. best available ---------- */
-function renderTabs() {
-  $("posTabs").innerHTML = POSITIONS.map(p =>
-    `<button class="tab ${p === POS ? "on" : ""}" data-pos="${p}">${p}</button>`).join(" ");
-  $("posTabs").querySelectorAll(".tab").forEach(b =>
-    b.onclick = () => { POS = b.dataset.pos; renderTabs(); renderBoard(); });
-}
-
-function renderBoard() {
-  const body = $("boardTable").querySelector("tbody");
-  if (!LATEST) { body.innerHTML = `<tr><td colspan="15" class="empty">—</td></tr>`; return; }
-  let rows = LATEST.best_available.slice();
-  if (POS !== "ALL") rows = rows.filter(r => r.position === POS);
-
-  const dir = (SORT === "adp" || SORT === "probability_gone") ? 1 : -1;
-  rows.sort((a, b) => {
-    const x = a[SORT] ?? -Infinity, y = b[SORT] ?? -Infinity;
-    return SORT === "probability_gone" ? (y - x) : (x - y) * dir;
+  if(TAB==="gone") return (LATEST.draft.recent_positions?[]:[]);
+  let rows=LATEST.best_available.slice();
+  if(POS!=="ALL") rows=rows.filter(r=>r.position===POS);
+  const asc = (SORT==="adp");
+  rows.sort((a,b)=>{
+    const x=a[SORT]??-Infinity, y=b[SORT]??-Infinity;
+    return asc?(x-y):(y-x);
   });
-
-  body.innerHTML = rows.slice(0, 80).map(r => `
-    <tr data-key="${esc(r.player_key)}">
-      <td><input type="checkbox" class="chk" data-key="${esc(r.player_key)}"
-        ${SELECTED.has(r.player_key) ? "checked" : ""}></td>
-      <td class="name" title="${esc(r.name)}">${esc(r.name)}</td>
-      <td>${esc(r.position)}</td>
-      <td class="muted">${esc(r.team ?? "")}</td>
-      <td>${r.tier ?? "–"}</td>
-      <td><b>${fmt(r.draft_now)}</b></td>
-      <td>${fmt(r.player_score)}</td>
-      <td>${fmt(r.projection, 0)}</td>
-      <td>${fmt(r.vbd, 0)}</td>
-      <td>${fmt(r.adp)}</td>
-      <td style="color:${(r.adp_value ?? 0) > 0 ? "var(--good)" : "var(--dim)"}">${r.adp_value === null ? "–" : (r.adp_value > 0 ? "+" : "") + fmt(r.adp_value, 0)}</td>
-      <td style="color:${urgencyColor(r.probability_gone)}">${pct(r.probability_gone)}</td>
-      <td class="muted">${fmt(r.floor, 0)}</td>
-      <td class="muted">${fmt(r.ceiling, 0)}</td>
-      <td class="muted" style="font-family:var(--sans)">${esc(r.outcome)}</td>
-    </tr>`).join("") || `<tr><td colspan="15" class="empty">No players at this position.</td></tr>`;
-
-  body.querySelectorAll(".chk").forEach(c => c.onchange = () => toggleSelect(c.dataset.key));
-  body.querySelectorAll("td.name").forEach(c =>
-    c.onclick = () => toggleSelect(c.parentElement.dataset.key));
+  return rows;
 }
 
-function toggleSelect(key) {
-  if (SELECTED.has(key)) SELECTED.delete(key); else SELECTED.add(key);
-  if (SELECTED.size > 2) SELECTED.delete(SELECTED.values().next().value);
-  renderBoard();
-  updateCompare();
-}
-
-async function updateCompare() {
-  const hint = $("compareHint");
-  if (SELECTED.size < 2) {
-    hint.innerHTML = SELECTED.size === 1
-      ? "One selected — tick one more to compare across both picks."
-      : "Tick two players to compare them across both picks.";
-    return;
+function renderList(){
+  const list=$("plist"), rows=listRows();
+  if(TAB==="gone"){
+    list.innerHTML=`<li class="empty">Drafted players are removed from the board automatically.</li>`;
+    $("listHint").textContent=""; return;
   }
-  hint.textContent = "Comparing…";
-  try {
-    const d = await api("/api/compare", { player_keys: [...SELECTED], refresh: false });
-    const best = d.winner;
-    hint.innerHTML = d.paths.map(p =>
-      `<span style="margin-right:20px">${p.player_key === best ? "★ " : ""}<b>${esc(p.name)}</b>
-       ${fmt(p.value_now)} + ${fmt(p.expected_next_value)} =
-       <b>${fmt(p.combined)}</b> <span class="muted">(→ ${esc(p.likely_next_position ?? "?")})</span></span>`
-    ).join("") + (d.margin !== null && d.winner_name
-      ? `<div style="margin-top:6px">Recommendation: <b>${esc(d.winner_name)}</b>, +${fmt(d.margin)} expected value across both picks.</div>`
-      : "");
-  } catch (e) { hint.innerHTML = `<span style="color:var(--bad)">${esc(e.message)}</span>`; }
+  if(!rows.length){ list.innerHTML=`<li class="empty">Nothing here yet.</li>`; return; }
+
+  if(TAB==="roster"){
+    list.innerHTML=rows.map(r=>`<li class="prow"><div class="pinner">
+      <div class="pmain"><div class="pname">${esc(r.name)}</div>
+        <div class="pmeta"><span class="posdot ${posClass(r.position)}">${esc(r.position)}</span>
+          ${esc(r.team??"")} · ${esc(r.slot)}</div></div>
+      <div></div><div></div></div></li>`).join("");
+    $("listHint").textContent=""; return;
+  }
+
+  list.innerHTML=rows.slice(0,120).map(r=>`
+    <li class="prow" data-key="${esc(r.player_key)}" data-name="${esc(r.name)}">
+      <div class="swipehint">mark drafted</div>
+      <div class="pinner">
+        <div class="pmain">
+          <div class="pname">${esc(r.name)}</div>
+          <div class="pmeta">
+            <span class="posdot ${posClass(r.position)}">${esc(r.position)}</span>
+            <span>${esc(r.team??"")}</span>
+            ${r.bye_week?`<span>bye ${r.bye_week}</span>`:""}
+            ${r.tier?`<span>T${r.tier}</span>`:""}
+            <span>${fmt(r.floor,0)}–${fmt(r.ceiling,0)}</span>
+          </div>
+        </div>
+        <div class="pnums">
+          <div class="a">${fmt(r.draft_now)}</div>
+          <div class="b">ADP ${fmt(r.adp,1)}</div>
+        </div>
+        <div class="gonebadge" style="color:${urgency(r.probability_gone)}">${pct(r.probability_gone)}</div>
+      </div>
+    </li>`).join("");
+
+  $("listHint").innerHTML="Swipe a row left to mark them drafted by someone else. "+
+    "The <b>%</b> is the chance they are gone before your next pick.";
+  attachSwipe();
 }
 
-/* ---------- 3. roster ---------- */
-function renderRoster(d) {
-  const r = d.my_roster;
-  const slots = r.starters.map(s => `
-    <div class="slot ${s.filled ? "" : "empty"}">
+/* Swipe-left to record a pick — the offline path, borrowed from the reference app and
+   wired to the same manual-entry endpoint the CLI uses. */
+function attachSwipe(){
+  $("plist").querySelectorAll(".prow[data-key]").forEach(row=>{
+    const inner=row.querySelector(".pinner");
+    let x0=null,y0=null,dx=0,locked=null;
+    inner.addEventListener("touchstart",e=>{
+      x0=e.touches[0].clientX; y0=e.touches[0].clientY; dx=0; locked=null;
+      inner.style.transition="none";
+    },{passive:true});
+    inner.addEventListener("touchmove",e=>{
+      if(x0==null) return;
+      const cx=e.touches[0].clientX-x0, cy=e.touches[0].clientY-y0;
+      if(locked==null) locked = Math.abs(cx)>Math.abs(cy)+4 ? "x" : "y";
+      if(locked!=="x") return;
+      dx=Math.min(0,cx);
+      inner.style.transform=`translateX(${dx}px)`;
+      row.classList.toggle("armed", dx<-70);
+    },{passive:true});
+    inner.addEventListener("touchend",()=>{
+      inner.style.transition="";
+      if(locked==="x" && dx<-70) recordPick(row.dataset.key,row.dataset.name);
+      inner.style.transform=""; row.classList.remove("armed"); x0=null;
+    });
+    // Desktop: click the % badge to record.
+    row.querySelector(".gonebadge").onclick=()=>recordPick(row.dataset.key,row.dataset.name);
+  });
+}
+
+async function recordPick(key,name){
+  if(BUSY) return; BUSY=true;
+  try{
+    const d=await api("/api/pick",{player_key:key});
+    toast(`${d.recorded.pick_label} · ${name}${d.is_my_pick?" — YOU'RE UP":""}`);
+    await onClock(false);
+  }catch(e){ toast(e.message.slice(0,90)); }
+  finally{ BUSY=false; }
+}
+
+/* ---------- 3 ---------- */
+function renderRoster(d){
+  const r=d.my_roster;
+  $("rosterBody").innerHTML =
+    r.starters.map(s=>`<div class="slot ${s.filled?"":"empty"}">
       <div class="lbl">${esc(s.slot)}</div>
-      <div class="who">${s.filled ? esc(s.name) + ` <span class="muted">${esc(s.team ?? "")}</span>` : "—"}</div>
-    </div>`).join("");
-  const bench = r.bench.length
-    ? `<div class="benchhead">Bench (${r.bench.length})</div>` + r.bench.map(s => `
-        <div class="slot"><div class="lbl">${esc(s.position ?? "BN")}</div>
-        <div class="who">${esc(s.name)}</div></div>`).join("")
-    : "";
-  $("rosterBody").innerHTML = slots + bench +
-    `<div class="muted" style="margin-top:10px">${r.size} drafted ·
-      ${r.unfilled_starters.length} starting slot${r.unfilled_starters.length === 1 ? "" : "s"} to fill</div>`;
+      <div class="who">${s.filled?esc(s.name)+` <span class="muted">${esc(s.team??"")}</span>`:"—"}</div>
+    </div>`).join("")+
+    (r.bench.length?`<div class="muted" style="margin:10px 0 6px">Bench</div>`+
+      r.bench.map(s=>`<div class="slot"><div class="lbl">${esc(s.position??"BN")}</div>
+      <div class="who">${esc(s.name)}</div></div>`).join(""):"")+
+    `<div class="muted" style="margin-top:9px">${r.size} drafted ·
+      ${r.unfilled_starters.length} slot(s) to fill</div>`;
 }
 
-/* ---------- environment ---------- */
-function renderEnv(d) {
-  const env = d.draft_environment;
-  const rows = ["QB","RB","WR","TE"].filter(p => env[p]).map(p => {
-    const e = env[p];
-    return `<tr>
-      <td>${p}</td>
-      <td style="width:110px"><div class="minibar"><span style="width:${Math.round(e.demand)}%;background:var(--accent)"></span></div></td>
-      <td>${fmt(e.demand, 0)}</td>
-      <td class="muted">${fmt(e.expected_gone_before_next_pick, 1)} gone</td>
-      <td class="muted">${e.startable_available} startable</td>
-      <td class="muted">value ${fmt(e.value_created, 0)}</td>
-    </tr>`;
+/* ---------- env + health ---------- */
+function renderEnv(d){
+  const env=d.draft_environment;
+  const rows=["QB","RB","WR","TE"].filter(p=>env[p]).map(p=>{
+    const e=env[p];
+    return `<div class="vorrow"><div class="vorlabel ${posClass(p)}">${p}</div>
+      <div class="vortrack"><span style="width:${Math.round(e.demand)}%;background:var(--accent)"></span></div>
+      <div class="vornum">${e.startable_available} left</div></div>`;
   }).join("");
-  $("envBody").innerHTML = `<table class="envtable">
-    <tr><th style="text-align:left">Pos</th><th colspan="2" style="text-align:left">Demand</th>
-    <th style="text-align:left">Before our pick</th><th style="text-align:left">Supply</th>
-    <th style="text-align:left">Falling to us</th></tr>${rows}</table>
-    <div class="muted" style="margin-top:9px">High demand drains a position; high
-    "falling to us" means the room is ignoring it and value is accumulating there.</div>`;
+  const stale=d.staleness.map(s=>`<span class="chip ${s.stale?"warn":"ok"}"><span class="dot"></span>${esc(s.source)}</span>`).join(" ");
+  $("envBody").innerHTML=`<div class="muted" style="margin-bottom:8px">Room demand by position</div>${rows}
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px">${stale}</div>
+    ${d.warnings.map(w=>`<div class="note">${esc(w)}</div>`).join("")}
+    ${d.simulation?`<div class="muted" style="margin-top:9px">${d.simulation.iterations.toLocaleString()} simulations · seed ${d.simulation.seed}</div>`:""}`;
 }
 
-/* ---------- health ---------- */
-function renderHealth(d) {
-  const stale = d.staleness.map(s =>
-    `<span class="pill ${s.stale ? "warn" : "ok"}"><span class="dot"></span>${esc(s.source)}
-     ${s.age_hours === null ? "never" : s.age_hours < 1 ? Math.round(s.age_hours*60)+"m" : s.age_hours.toFixed(1)+"h"}</span>`
-  ).join(" ");
-  const warns = d.warnings.map(w => `<div class="note">${esc(w)}</div>`).join("");
-  $("healthBody").innerHTML = `<div style="display:flex;gap:7px;flex-wrap:wrap">${stale}</div>` + warns +
-    (d.simulation ? `<div class="muted" style="margin-top:9px">${d.simulation.iterations.toLocaleString()}
-      simulations of ${d.simulation.picks_simulated} picks (seed ${d.simulation.seed}). ${esc(d.simulation.approximation)}</div>` : "");
+/* ---------- main ---------- */
+async function onClock(showBusy=true){
+  const btn=$("clockBtn");
+  if(showBusy){ btn.disabled=true; btn.textContent="ANALYSING…"; }
+  $("alerts").innerHTML="";
+  try{
+    const d=await api("/api/on-clock",{refresh:true,simulate:true,limit:140});
+    LATEST=d;
+    renderClock(d); renderVor(d); renderSurvival(d); renderWhatIf(d);
+    renderList(); renderRoster(d); renderEnv(d);
+    if(d.sync_error) alert_(`Live sync did not run — using the stored board. <span class="muted">${esc(d.sync_error)}</span>`);
+  }catch(e){
+    alert_("<b>Could not analyse.</b><br>"+esc(e.message),"note err");
+  }finally{ btn.disabled=false; btn.textContent="ANALYSE PICK"; }
 }
 
-/* ---------- main action ---------- */
-async function onTheClock() {
-  const btn = $("clockBtn");
-  btn.disabled = true; btn.textContent = "ANALYSING…";
-  clearAlerts();
-  try {
-    const d = await api("/api/on-clock", { refresh: true, simulate: true, limit: 120 });
-    LATEST = d;
-    renderClock(d); renderSurvival(d); renderWhatIf(d);
-    renderBoard(); renderRoster(d); renderEnv(d); renderHealth(d);
-
-    const pill = $("syncPill"); pill.hidden = false;
-    pill.className = "pill " + (d.stale ? "warn" : (d.synced ? "ok" : "warn"));
-    pill.lastElementChild.textContent = d.synced ? "live" : (d.stale ? "stale board" : "stored board");
-    pill.title = d.sync_error ?? "";
-    if (d.sync_error) {
-      alert_(`Live sync did not run (<code>${esc(d.sync_error)}</code>). Using the stored
-        board — treat it as stale if the draft has moved.`);
-    }
-    SELECTED.clear(); updateCompare();
-  } catch (e) {
-    alert_("<b>Could not analyse the pick.</b><br>" + esc(e.message), "note err");
-  } finally {
-    btn.disabled = false; btn.textContent = "I'M ON THE CLOCK";
-  }
-}
-
-$("clockBtn").onclick = onTheClock;
-$("sortSel").onchange = (e) => { SORT = e.target.value; renderBoard(); };
-document.addEventListener("keydown", (e) => {
-  if (e.key.toLowerCase() === "c" && !/input|select|textarea/i.test(e.target.tagName)) onTheClock();
-});
-renderTabs();
-loadConfig();
+$("clockBtn").onclick=()=>onClock();
+$("refreshBtn").onclick=()=>onClock();
+$("undoBtn").onclick=async()=>{
+  try{ const d=await api("/api/undo",{});
+    toast(d.removed?`Undid ${d.removed.name}`:"Nothing to undo");
+    if(d.removed) await onClock(false);
+  }catch(e){ toast(e.message.slice(0,90)); }
+};
+$("sortSel").onchange=e=>{SORT=e.target.value;renderList();};
+renderTabs(); loadConfig();
 </script>
 </body>
 </html>
