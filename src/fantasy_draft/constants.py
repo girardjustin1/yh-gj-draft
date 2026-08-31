@@ -63,23 +63,16 @@ NAME_SUFFIXES: Final[frozenset[str]] = frozenset(
     {"jr", "sr", "ii", "iii", "iv", "v", "vi"}
 )
 
-#: Nicknames seen in fantasy feeds -> the name used by nflverse. Only unambiguous
-#: entries belong here; anything uncertain must fail to match and be logged instead.
-NAME_NICKNAMES: Final[dict[str, str]] = {
-    "kenneth walker": "kenneth walker iii",
-    "mike thomas": "michael thomas",
-    "will fuller": "william fuller",
-    "josh palmer": "joshua palmer",
-    "gabe davis": "gabriel davis",
-    "chig okonkwo": "chigoziem okonkwo",
-    "dj moore": "d j moore",
-    "aj brown": "a j brown",
-    "jk dobbins": "j k dobbins",
-    "cj stroud": "c j stroud",
-    "tj hockenson": "t j hockenson",
-    "dk metcalf": "d k metcalf",
-    "marquise brown": "hollywood brown",
-}
+#: Genuine nickname corrections, applied *after* normalization, mapping a normalized
+#: alias to the normalized nflverse form.
+#:
+#: Empty on purpose. Measured against the live 2026 FantasyPros board, the general rule
+#: in `normalization.players` (accent folding, punctuation stripping, suffix removal,
+#: initial-run joining) matches 100% of the top 300 non-DST names with no lookups at
+#: all. Every entry here is a place where two feeds are asserted to mean the same
+#: person, so entries get added only when a real unmatched name proves one is needed --
+#: never speculatively. Check `ff data unresolved-players` before adding to this table.
+NAME_NICKNAMES: Final[dict[str, str]] = {}
 
 # --- Data sources ------------------------------------------------------------------
 

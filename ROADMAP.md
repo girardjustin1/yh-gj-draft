@@ -34,19 +34,37 @@ initializes (24 tables, schema v1) ✅
 
 ---
 
-## 🔄 Phase 1 — NFL data
+## ✅ Phase 1 — NFL data
 
 Ingest nflverse into DuckDB with lineage and freshness tracking.
 
-- ⬜ `data/nflverse.py` adapters: players, ff_playerids, teams, schedules, rosters,
-  player_stats, ff_opportunity, snap_counts, injuries, depth_charts, ff_rankings
-- ⬜ `normalization/players.py` — `player_key` assignment, name normalization
-- ⬜ `normalization/ids.py` — cross-platform ID map, unresolved logging
-- ⬜ `normalization/teams.py` — team canonicalization, bye weeks from the 2026 schedule
-- ⬜ `ff data refresh`, `ff data status`, `ff data unresolved-players`
-- ⬜ Tests: identity resolution, normalization, freshness
+**Built**
+- `data/nflverse.py` — 11 dataset adapters, each failure-isolated and defensive about
+  vendor schema changes (`pick()` degrades a renamed column to null instead of raising)
+- `normalization/players.py` — name normal form: accent folding, punctuation stripping,
+  suffix removal, initial-run joining
+- `normalization/ids.py` — `IdentityMap`: gsis_id → platform ID → name+position, with
+  ambiguity reported rather than merged
+- `normalization/teams.py` — team canonicalization, bye weeks derived from the schedule
+- `queries.py` — shared read layer for CLI/API/MCP
+- `ff data refresh|status|sources|unresolved-players`, `ff players NAME`
 
-**Acceptance** — I can query a current NFL player locally.
+**Acceptance** ✅ — a full refresh loads **292,552 rows in ~7s**:
+players 27,262 · rankings 1,849 (2026 ECR scraped 2026-08-28) · player_stats 75,879
+(2022-2025) · snap_counts 106,148 · opportunity 24,178 · injuries 23,564 ·
+schedules 1,411 · depth_charts 2,635 · all 32 2026 bye weeks derived.
+`ff players "Bijan Robinson"` returns identity, ECR spread, usage, expected-vs-actual
+points, and depth-chart slot.
+
+**Findings**
+- **515/517** of the FantasyPros overall board joins to a canonical player. The 6
+  unresolved are ECR 250+ camp bodies, all listed in `ff data unresolved-players`.
+- The speculative nickname table was **deleted**: measured against the live board, the
+  general normalization rule matches 100% of the top-300 non-DST names with no lookups.
+  Every entry in such a table asserts two feeds mean the same person, so entries are now
+  added only when a real unmatched name proves one is needed.
+- `normalize_position` preserves IDP positions (LB/DL/DB) because they disambiguate
+  identity; draftability is filtered at ingest via `DRAFTABLE_POSITIONS`.
 
 ---
 

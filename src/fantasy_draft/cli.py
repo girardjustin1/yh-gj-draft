@@ -10,6 +10,7 @@ from __future__ import annotations
 import sys
 from typing import Annotated
 
+import polars as pl
 import typer
 from rich.console import Console
 from rich.panel import Panel
@@ -33,8 +34,10 @@ app = typer.Typer(
 )
 config_app = typer.Typer(help="Inspect and validate league configuration.", no_args_is_help=True)
 db_app = typer.Typer(help="Database maintenance.", no_args_is_help=True)
+data_app = typer.Typer(help="Ingest and inspect NFL/fantasy data.", no_args_is_help=True)
 app.add_typer(config_app, name="config")
 app.add_typer(db_app, name="db")
+app.add_typer(data_app, name="data")
 
 OK = "[green]OK[/green]"
 WARN = "[yellow]WARN[/yellow]"
@@ -368,6 +371,337 @@ def db_reset(
         sidecar.unlink()
     with connect(path) as db:
         console.print(f"{OK} recreated {path} ({len(db.table_names())} tables)")
+
+
+# --- data ----------------------------------------------------------------------------
+
+
+def _humanize_age(hours: float | None) -> str:
+    if hours is None:
+        return "[red]never[/red]"
+    if hours < 1 / 60:
+        return "just now"
+    if hours < 1:
+        return f"{hours * 60:.0f} min ago"
+    if hours < 48:
+        return f"{hours:.1f}h ago"
+    return f"{hours / 24:.1f}d ago"
+
+
+@data_app.command("refresh")
+def data_refresh(
+    ctx: typer.Context,
+    only: Annotated[
+        list[str] | None,
+        typer.Option("--only", help="Refresh just these sources. Repeatable."),
+    ] = None,
+) -> None:
+    """Refresh NFL and fantasy datasets from nflverse.
+
+    Sources are refreshed independently: one failing is reported and the rest continue.
+    """
+    from .data.nflverse import NflverseIngest
+
+    cfg = get_config(ctx)
+    with connect(cfg.paths.db_path) as db:
+        ingest = NflverseIngest(cfg, db)
+        known = set(ingest.datasets())
+        if only:
+            unknown = set(only) - known
+            if unknown:
+                err_console.print(
+                    f"[red]Unknown source(s):[/red] {', '.join(sorted(unknown))}\n"
+                    f"Available: {', '.join(sorted(known))}"
+                )
+                raise typer.Exit(code=2)
+
+        table = Table(title="ff data refresh", header_style="bold", title_justify="left")
+        table.add_column("Source", style="cyan", no_wrap=True)
+        table.add_column("Status", no_wrap=True)
+        table.add_column("Rows", justify="right")
+        table.add_column("Time", justify="right")
+        table.add_column("Detail", overflow="fold")
+
+        with console.status("[cyan]Refreshing...", spinner="dots"):
+            results = ingest.refresh(only=list(only) if only else None)
+
+        for result in results:
+            status = {"ok": OK, "failed": FAIL, "skipped": "[dim]SKIP[/dim]"}[result.status]
+            table.add_row(
+                result.source,
+                status,
+                f"{result.rows:,}" if result.rows else "",
+                f"{result.duration:.1f}s" if result.duration else "",
+                result.message,
+            )
+        console.print(table)
+
+        unresolved = db.row_count("unresolved_players")
+
+    failed = [r.source for r in results if r.status == "failed"]
+    if failed:
+        console.print(
+            f"\n[yellow]{len(failed)} source(s) failed:[/yellow] {', '.join(failed)}"
+            "\nThe engine still runs; affected components will report lower confidence."
+        )
+    if unresolved:
+        console.print(
+            f"[yellow]{unresolved} player(s) unresolved[/yellow] — "
+            "inspect with [bold]ff data unresolved-players[/bold]"
+        )
+
+
+@data_app.command("status")
+def data_status(ctx: typer.Context) -> None:
+    """Show what data we hold and how stale it is."""
+    from .models import DataFreshness
+
+    cfg = get_config(ctx)
+    from .data.nflverse import NflverseIngest
+
+    with connect(cfg.paths.db_path) as db:
+        sources = list(NflverseIngest(cfg, db).datasets())
+        rows: list[DataFreshness] = []
+        for source in sources:
+            spec = cfg.data_sources.spec(source)
+            entry = db.last_refresh(source)
+            rows.append(
+                DataFreshness(
+                    source=source,
+                    updated_at=entry["ingested_at"] if entry else None,
+                    rows=entry["rows"] if entry else None,
+                    max_age_hours=spec.max_age_hours,
+                    ok=entry is not None,
+                )
+            )
+        counts = db.table_counts()
+
+    table = Table(title="Data freshness", header_style="bold", title_justify="left")
+    table.add_column("Source", style="cyan", no_wrap=True)
+    table.add_column("Updated", no_wrap=True)
+    table.add_column("Rows", justify="right")
+    table.add_column("Stale after", justify="right")
+    for row in rows:
+        age = _humanize_age(row.age_hours)
+        marker = f"[yellow]{age}[/yellow]" if row.is_stale and row.updated_at else age
+        table.add_row(
+            row.source,
+            marker,
+            f"{row.rows:,}" if row.rows else "",
+            f"{row.max_age_hours:g}h",
+        )
+    console.print(table)
+
+    stale = [r.source for r in rows if r.is_stale]
+    if stale:
+        console.print(
+            f"[yellow]{len(stale)} source(s) stale or never loaded:[/yellow] {', '.join(stale)}"
+        )
+    else:
+        console.print("[green]All sources fresh.[/green]")
+
+    populated = {k: v for k, v in counts.items() if v}
+    console.print(
+        f"\n[dim]{len(populated)} populated tables, "
+        f"{sum(populated.values()):,} rows total.[/dim]"
+    )
+
+
+@data_app.command("unresolved-players")
+def data_unresolved(
+    ctx: typer.Context,
+    limit: Annotated[int, typer.Option("--limit", "-n", help="Rows to show.")] = 40,
+) -> None:
+    """Show player records we could not confidently map to a canonical identity."""
+    cfg = get_config(ctx)
+    with connect(cfg.paths.db_path) as db:
+        frame = db.query(
+            """
+            SELECT source, raw_name, position, team, reason, candidates, seen_at
+            FROM unresolved_players ORDER BY seen_at DESC, raw_name LIMIT ?
+            """,
+            [limit],
+        )
+        total = db.row_count("unresolved_players")
+
+    if not total:
+        console.print("[green]No unresolved players.[/green]")
+        return
+
+    table = Table(
+        title=f"Unresolved players ({total} total)", header_style="bold", title_justify="left"
+    )
+    for column in ("Source", "Name", "Pos", "Team", "Reason", "Candidates"):
+        table.add_column(column, style="cyan" if column == "Source" else "")
+    for row in frame.iter_rows(named=True):
+        table.add_row(
+            row["source"], row["raw_name"], row["position"] or "",
+            row["team"] or "", row["reason"], (row["candidates"] or "")[:40],
+        )
+    console.print(table)
+    console.print(
+        "\n[dim]These are never merged into another player. Ambiguous rows are excluded\n"
+        "from the board; unmatched rows keep a synthetic identity with lower confidence.[/dim]"
+    )
+
+
+@data_app.command("sources")
+def data_sources(ctx: typer.Context) -> None:
+    """List configured data sources."""
+    cfg = get_config(ctx)
+    table = Table(title="Configured sources", header_style="bold", title_justify="left")
+    table.add_column("Source", style="cyan")
+    table.add_column("Enabled", no_wrap=True)
+    table.add_column("Stale after", justify="right")
+    table.add_column("Notes", overflow="fold")
+    for name, spec in cfg.data_sources.sources.items():
+        table.add_row(
+            name,
+            "[green]yes[/green]" if spec.enabled else "[dim]no[/dim]",
+            f"{spec.max_age_hours:g}h",
+            spec.notes,
+        )
+    console.print(table)
+
+
+# --- players -------------------------------------------------------------------------
+
+
+@app.command("players")
+def players_cmd(
+    ctx: typer.Context,
+    name: Annotated[str, typer.Argument(help="Player name, or part of one.")],
+    position: Annotated[
+        str | None, typer.Option("--position", "-p", help="Filter by position.")
+    ] = None,
+) -> None:
+    """Inspect a player: identity, market rank, usage, and role."""
+    from . import queries
+
+    cfg = get_config(ctx)
+    with connect(cfg.paths.db_path) as db:
+        if db.row_count("players") == 0:
+            err_console.print("No data ingested. Run [bold]ff data refresh[/bold] first.")
+            raise typer.Exit(code=1)
+
+        matches = queries.search_players(db, name, position=position, limit=10)
+        if matches.is_empty():
+            err_console.print(f"No player matching [bold]{name}[/bold].")
+            raise typer.Exit(code=1)
+
+        if matches.height > 1 and matches["match_rank"][0] != 0:
+            table = Table(title=f"Matches for '{name}'", header_style="bold", title_justify="left")
+            for column in ("Name", "Pos", "Team", "ECR"):
+                table.add_column(column)
+            for row in matches.iter_rows(named=True):
+                table.add_row(
+                    row["full_name"], row["position"] or "", row["team"] or "",
+                    f"{row['ecr']:.1f}" if row["ecr"] is not None else "",
+                )
+            console.print(table)
+            console.print("[dim]Be more specific to see a single player.[/dim]")
+            return
+
+        player = matches.to_dicts()[0]
+        key = player["player_key"]
+
+        bye = f"bye {player['bye_week']}" if player["bye_week"] else "bye unknown"
+        console.print(
+            Panel(
+                Text.assemble(
+                    (player["full_name"], "bold"), "  ",
+                    (f"{player['position']} · {player['team']} · {bye}", "cyan"), "\n",
+                    (f"player_key: {key}", "dim"),
+                ),
+                border_style="cyan",
+            )
+        )
+
+        rankings = queries.player_rankings(db, key)
+        overall = rankings.filter(pl.col("ranking_type") == "redraft-overall")
+        positional = rankings.filter(
+            pl.col("ranking_type").str.starts_with("redraft-")
+            & (pl.col("ranking_type") != "redraft-overall")
+        )
+        if overall.height:
+            row = overall.to_dicts()[0]
+            market = Table(title="Market (FantasyPros ECR)", header_style="bold", title_justify="left")
+            for column in ("Board", "ECR", "SD", "Best", "Worst"):
+                market.add_column(column, justify="right" if column != "Board" else "left")
+            market.add_row(
+                "Overall", f"{row['ecr']:.1f}",
+                f"{row['sd']:.1f}" if row["sd"] is not None else "-",
+                str(row["best"] or "-"), str(row["worst"] or "-"),
+            )
+            for pos_row in positional.to_dicts():
+                market.add_row(
+                    pos_row["ranking_type"].removeprefix("redraft-").upper(),
+                    f"{pos_row['ecr']:.1f}",
+                    f"{pos_row['sd']:.1f}" if pos_row["sd"] is not None else "-",
+                    str(pos_row["best"] or "-"), str(pos_row["worst"] or "-"),
+                )
+            console.print(market)
+        else:
+            console.print("[yellow]No consensus ranking for this player.[/yellow]")
+
+        stats = queries.player_season_stats(db, key)
+        if stats.height:
+            usage = Table(title="Usage by season", header_style="bold", title_justify="left")
+            for column in ("Season", "G", "Car", "RuYd", "RuTD", "Tgt", "Rec", "ReYd", "ReTD", "Tgt%"):
+                usage.add_column(column, justify="right" if column != "Season" else "left")
+            for row in stats.to_dicts():
+                usage.add_row(
+                    str(row["season"]), str(row["games"]),
+                    _num(row["carries"]), _num(row["rush_yards"]), _num(row["rush_tds"]),
+                    _num(row["targets"]), _num(row["receptions"]), _num(row["rec_yards"]),
+                    _num(row["rec_tds"]),
+                    f"{row['target_share'] * 100:.1f}%" if row["target_share"] else "-",
+                )
+            console.print(usage)
+
+        opportunity = queries.player_opportunity(db, key)
+        snaps = queries.player_snaps(db, key)
+        if opportunity.height:
+            merged = opportunity.join(snaps.select("season", "snap_share"), on="season", how="left")
+            opp = Table(
+                title="Opportunity: expected vs actual points",
+                header_style="bold", title_justify="left",
+            )
+            for column in ("Season", "G", "Expected", "Actual", "Diff", "Snap%"):
+                opp.add_column(column, justify="right" if column != "Season" else "left")
+            for row in merged.to_dicts():
+                expected, actual = row["expected_points"], row["actual_points"]
+                diff = (actual - expected) if (expected is not None and actual is not None) else None
+                opp.add_row(
+                    str(row["season"]), str(row["games"]),
+                    _num(expected, 1), _num(actual, 1),
+                    f"[green]+{diff:.1f}[/green]" if diff and diff > 0
+                    else (f"[red]{diff:.1f}[/red]" if diff else "-"),
+                    f"{row['snap_share'] * 100:.0f}%" if row.get("snap_share") is not None else "-",
+                )
+            console.print(opp)
+            console.print(
+                "[dim]Expected points come from the nflverse ff_opportunity model: what a\n"
+                "player's usage was worth, independent of whether the ball bounced his way.[/dim]"
+            )
+
+        depth = queries.depth_chart_slot(db, key)
+        injury = queries.latest_injury(db, key)
+        notes = []
+        if depth:
+            notes.append(f"Depth chart: {depth['pos_abb']} #{depth['pos_rank']} ({depth['team']})")
+        if injury and injury.get("report_status"):
+            notes.append(
+                f"Injury report: {injury['report_status']} "
+                f"({injury.get('report_primary') or 'unspecified'}) "
+                f"— {injury['season']} week {injury['week']}"
+            )
+        if notes:
+            console.print(Panel("\n".join(notes), title="Role & health", border_style="dim"))
+
+
+def _num(value: float | None, digits: int = 0) -> str:
+    return "-" if value is None else f"{value:,.{digits}f}"
 
 
 __all__ = ["app", "console", "get_config", "Database"]

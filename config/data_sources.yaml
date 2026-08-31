@@ -15,10 +15,14 @@ sources:
     max_age_hours: 168
     notes: "Canonical player list + cross-platform IDs. Changes slowly."
 
-  nflverse_ff_playerids:
+  # NOTE: the ffverse ID map (load_ff_playerids) is loaded as part of
+  # nflverse_players, since the canonical player universe and the cross-platform ID
+  # map have to be built together to stay consistent. It has no separate entry.
+
+  nflverse_teams:
     enabled: true
-    max_age_hours: 168
-    notes: "DynastyProcess/ffverse ID map: sleeper, espn, yahoo, fantasypros, pfr."
+    max_age_hours: 720
+    notes: "Team abbreviations, names, divisions. Effectively static."
 
   nflverse_schedules:
     enabled: true
@@ -34,6 +38,11 @@ sources:
     enabled: true
     max_age_hours: 168
     notes: "Weekly historical box scores; basis for our own fantasy-point scoring."
+
+  nflverse_team_stats:
+    enabled: true
+    max_age_hours: 168
+    notes: "Weekly team box scores; basis for the offensive environment score."
 
   nflverse_ff_opportunity:
     enabled: true
