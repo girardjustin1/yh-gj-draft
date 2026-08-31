@@ -68,15 +68,42 @@ points, and depth-chart slot.
 
 ---
 
-## ⬜ Phase 2 — Base fantasy engine
+## ✅ Phase 2 — Base fantasy engine
 
-- Fantasy-point scoring of historical stats in *our* league's rules
-- Projection adapters (CSV/Parquet/JSON import) + consensus
-- Replacement level, VBD, tiers, scarcity, basic opportunity
-- Player Score, Value Score
-- `ff board`, `ff board --position RB`, `ff players NAME`, `ff compare A B`, `ff explain NAME`
+**Built**
+- `analytics/fantasy_points.py` — every point recomputed in *our* scoring rules, never
+  borrowed from a vendor's PPR column
+- `analytics/projections.py` — the **historical positional value curve**: score past
+  seasons in our rules, learn what each positional finish is worth, map the consensus
+  board's ordering onto it. Plus CSV/Parquet/JSON import with column-alias detection and
+  component-stat scoring
+- `analytics/replacement.py` · `vbd.py` · `tiers.py` · `scarcity.py` · `opportunity.py` ·
+  `offense.py` · `risk.py` · `market.py` · `board.py`
+- `scoring/compose.py` — confidence-weighted composition; `normalize.py`;
+  `player_score.py`; `value_score.py`
+- `ff board [--position --sort --replacement]`, `ff compare A B`, `ff explain NAME`,
+  `ff import projections|list`
 
-**Acceptance** — the local board ranks players and explains every score.
+**Acceptance** ✅ — the board ranks 775 players and explains every component.
+Verified against 2025: CMC 365.6 and Josh Allen 364.6 half-PPR points.
+RB replacement lands at **RB41**, not RB24 — 28 league-wide starting slots × 1.55 for
+bench hoarding — which is exactly the point the spec makes.
+
+**Findings**
+- **A global gap threshold cannot tier a position.** Projection gaps decay monotonically
+  (RB gaps run 17, 13, 14, 9 at the top and a flat 4 by RB20), so one threshold fired on
+  each of the top 8 backs — making each his own tier — then never fired again, dumping
+  130 into one. Gaps are now standardized against their local neighbourhood, which
+  produces football-sensible tiers: Gibbs/Bijan/CMC as tier 1, then a real 11-player
+  plateau at RB7-17.
+- **Raw projected points put six QBs above every RB**, confirming VBD is not optional
+  bookkeeping but the thing that makes the board usable.
+- Confidence varies as designed: a true rookie with no snaps scores 0.70 Player Score
+  confidence against 0.85 for veterans, and his opportunity weight is redistributed
+  rather than faked at 50.
+- K and DST are **not modelled** and say so on every board: nflverse carries no
+  team-defence scoring and we do not ingest kicking stats. Their value over replacement
+  is near zero regardless.
 
 ---
 

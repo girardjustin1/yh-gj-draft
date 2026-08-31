@@ -8,6 +8,7 @@ about what it does not know.
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 from typing import Annotated
 
 import polars as pl
@@ -35,9 +36,11 @@ app = typer.Typer(
 config_app = typer.Typer(help="Inspect and validate league configuration.", no_args_is_help=True)
 db_app = typer.Typer(help="Database maintenance.", no_args_is_help=True)
 data_app = typer.Typer(help="Ingest and inspect NFL/fantasy data.", no_args_is_help=True)
+import_app = typer.Typer(help="Import your own projections or ADP.", no_args_is_help=True)
 app.add_typer(config_app, name="config")
 app.add_typer(db_app, name="db")
 app.add_typer(data_app, name="data")
+app.add_typer(import_app, name="import")
 
 OK = "[green]OK[/green]"
 WARN = "[yellow]WARN[/yellow]"
@@ -436,7 +439,24 @@ def data_refresh(
             )
         console.print(table)
 
+        # Projections are derived from the rankings we just loaded, so they are stale
+        # the moment a refresh lands.
+        projection_rows = 0
+        if not only or "fantasypros_ecr" in only:
+            from .analytics.projections import refresh_derived_projections
+
+            try:
+                projection_rows = refresh_derived_projections(db, cfg)
+            except Exception as exc:  # noqa: BLE001
+                console.print(f"[yellow]Could not derive projections: {exc}[/yellow]")
+
         unresolved = db.row_count("unresolved_players")
+
+    if projection_rows:
+        console.print(
+            f"[green]OK[/green] derived {projection_rows:,} projections from the "
+            f"consensus board and the historical positional value curve"
+        )
 
     failed = [r.source for r in results if r.status == "failed"]
     if failed:
@@ -562,6 +582,79 @@ def data_sources(ctx: typer.Context) -> None:
             spec.notes,
         )
     console.print(table)
+
+
+# --- import --------------------------------------------------------------------------
+
+
+@import_app.command("projections")
+def import_projections_cmd(
+    ctx: typer.Context,
+    path: Annotated[Path, typer.Argument(help="CSV, Parquet, or JSON file.")],
+    source: Annotated[
+        str | None, typer.Option("--source", help="Label for this source. Defaults to the filename.")
+    ] = None,
+) -> None:
+    """Import a projection file. Sources are kept separately, never overwritten."""
+    from .analytics.projections import ProjectionImportError, import_projections
+
+    cfg = get_config(ctx)
+    with connect(cfg.paths.db_path) as db:
+        if db.row_count("players") == 0:
+            err_console.print("Run [bold]ff data refresh[/bold] first so names can be matched.")
+            raise typer.Exit(code=1)
+        try:
+            frame, unresolved = import_projections(db, cfg, path, source=source)
+        except ProjectionImportError as exc:
+            err_console.print(Panel(str(exc), title="Import failed", border_style="red"))
+            raise typer.Exit(code=1) from exc
+
+        # A synthetic key ("nm-", "slp-", "fp-") means we kept the player but could
+        # not tie them to our canonical universe. That is not a match.
+        known = set(db.query("SELECT player_key FROM players")["player_key"])
+        matched = int(frame.filter(pl.col("player_key").is_in(list(known))).height)
+
+    console.print(
+        f"{OK} imported [bold]{frame.height:,}[/bold] projections from {path.name} "
+        f"([bold]{matched:,}[/bold] matched to a canonical player)"
+    )
+    if unresolved:
+        console.print(
+            f"[yellow]{unresolved} name(s) could not be resolved[/yellow] — "
+            "see [bold]ff data unresolved-players[/bold]"
+        )
+    console.print("[dim]Run [bold]ff board[/bold] to see the blended result.[/dim]")
+
+
+@import_app.command("list")
+def import_list(ctx: typer.Context) -> None:
+    """Show every projection source currently stored."""
+    cfg = get_config(ctx)
+    with connect(cfg.paths.db_path) as db:
+        frame = db.query(
+            """
+            SELECT source, count(*) AS players, avg(fantasy_points) AS avg_points,
+                   max(source_updated_at) AS updated, max(ingested_at) AS imported
+            FROM projections WHERE season = ? GROUP BY source ORDER BY source
+            """,
+            [cfg.league.season],
+        )
+    if frame.is_empty():
+        console.print("No projections stored. Run [bold]ff data refresh[/bold].")
+        return
+    table = Table(title="Projection sources", header_style="bold", title_justify="left")
+    for column in ("Source", "Players", "Avg points", "Imported"):
+        table.add_column(column, justify="right" if column != "Source" else "left")
+    for row in frame.iter_rows(named=True):
+        table.add_row(
+            row["source"], f"{row['players']:,}", _num(row["avg_points"], 1),
+            str(row["imported"])[:19],
+        )
+    console.print(table)
+    console.print(
+        "[dim]Sources are blended by the weights in config/data_sources.yaml. "
+        "The derived curve is always kept as a floor so no player drops off the board.[/dim]"
+    )
 
 
 # --- players -------------------------------------------------------------------------
@@ -698,6 +791,289 @@ def players_cmd(
             )
         if notes:
             console.print(Panel("\n".join(notes), title="Role & health", border_style="dim"))
+
+
+# --- board ---------------------------------------------------------------------------
+
+
+def _load_board(cfg, current_pick: int | None = None, quiet: bool = False):
+    """Build the scored board, surfacing any degraded signals as warnings."""
+    from .analytics.board import build_board
+
+    with connect(cfg.paths.db_path) as db:
+        if db.row_count("projections") == 0:
+            from .analytics.projections import refresh_derived_projections
+
+            if db.row_count("rankings") == 0:
+                err_console.print(
+                    "No rankings ingested. Run [bold]ff data refresh[/bold] first."
+                )
+                raise typer.Exit(code=1)
+            refresh_derived_projections(db, cfg)
+        board = build_board(db, cfg, current_pick=current_pick)
+
+    if board.frame.is_empty():
+        for warning in board.warnings:
+            err_console.print(f"[red]{warning}[/red]")
+        raise typer.Exit(code=1)
+    if board.warnings and not quiet:
+        for warning in board.warnings:
+            console.print(f"[yellow]note:[/yellow] [dim]{warning}[/dim]")
+        console.print()
+    return board
+
+
+def _tier_style(tier: int | None) -> str:
+    return "" if tier is None else ["bold cyan", "cyan", "green", "yellow"][min(tier - 1, 3)]
+
+
+@app.command("board")
+def board_cmd(
+    ctx: typer.Context,
+    position: Annotated[
+        str | None, typer.Option("--position", "-p", help="Limit to one position.")
+    ] = None,
+    limit: Annotated[int, typer.Option("--limit", "-n", help="Players to show.")] = 30,
+    sort_by: Annotated[
+        str, typer.Option("--sort", help="player|value|vbd|points|adp")
+    ] = "player",
+    show_replacement: Annotated[
+        bool, typer.Option("--replacement", help="Show replacement-level derivation.")
+    ] = False,
+) -> None:
+    """Show the ranked draft board."""
+    from .normalization.players import normalize_position
+
+    cfg = get_config(ctx)
+    board = _load_board(cfg)
+
+    canonical = normalize_position(position) if position else None
+    sort_column = {
+        "player": "player_score", "value": "value_score", "vbd": "vbd",
+        "points": "projected_points", "adp": "adp",
+    }.get(sort_by)
+    if sort_column is None:
+        err_console.print(f"[red]Unknown --sort {sort_by!r}.[/red] Use player|value|vbd|points|adp")
+        raise typer.Exit(code=2)
+
+    frame = board.frame
+    if canonical:
+        frame = frame.filter(pl.col("position") == canonical)
+        if frame.is_empty():
+            err_console.print(f"No players at position {canonical}.")
+            raise typer.Exit(code=1)
+    frame = frame.sort(sort_column, descending=(sort_column != "adp"), nulls_last=True).head(limit)
+
+    title = f"{cfg.league.label} draft board"
+    if canonical:
+        title += f" — {canonical}"
+    table = Table(title=title, header_style="bold", title_justify="left")
+    table.add_column("#", justify="right", style="dim", no_wrap=True)
+    table.add_column("Player", no_wrap=True, min_width=18)
+    table.add_column("Pos", justify="center", no_wrap=True)
+    table.add_column("Tm", justify="center", style="dim", no_wrap=True)
+    table.add_column("Bye", justify="right", style="dim", no_wrap=True)
+    table.add_column("Proj", justify="right", no_wrap=True)
+    table.add_column("VBD", justify="right", no_wrap=True)
+    table.add_column("Tier", justify="center", no_wrap=True)
+    table.add_column("ADP", justify="right", no_wrap=True)
+    table.add_column("PLYR", justify="right", no_wrap=True)
+    table.add_column("VAL", justify="right", no_wrap=True)
+    table.add_column("Conf", justify="right", style="dim", no_wrap=True)
+
+    for i, row in enumerate(frame.iter_rows(named=True), start=1):
+        tier = row.get("tier")
+        table.add_row(
+            str(i),
+            row["player_name"],
+            row["position"],
+            row.get("team") or "",
+            str(row.get("bye_week") or ""),
+            _num(row.get("projected_points"), 1),
+            _num(row.get("vbd"), 1),
+            f"[{_tier_style(tier)}]{tier}[/{_tier_style(tier)}]" if tier else "",
+            _num(row.get("adp"), 1),
+            f"[bold]{row['player_score']:.1f}[/bold]",
+            f"{row['value_score']:.1f}",
+            f"{row.get('player_score_confidence', 0) * 100:.0f}%",
+        )
+    console.print(table)
+
+    if show_replacement:
+        rep = Table(title="Replacement level", header_style="bold", title_justify="left")
+        rep.add_column("Pos", style="cyan")
+        rep.add_column("Derivation", overflow="fold")
+        for level in board.replacement.values():
+            if level.players_available:
+                rep.add_row(level.position, level.explanation)
+        console.print(rep)
+
+    scarcity = Table(title="Positional scarcity", header_style="bold", title_justify="left")
+    scarcity.add_column("Pos", style="cyan")
+    scarcity.add_column("Score", justify="right")
+    scarcity.add_column("Startable left", justify="right")
+    scarcity.add_column("Starter slots left", justify="right")
+    scarcity.add_column("Note", overflow="fold", style="dim")
+    for entry in sorted(board.scarcity.values(), key=lambda e: -e.score):
+        if entry.available == 0:
+            continue
+        scarcity.add_row(
+            entry.position, f"{entry.score:.0f}", str(entry.startable_available),
+            f"{entry.remaining_demand:.0f}", "; ".join(entry.notes),
+        )
+    console.print(scarcity)
+
+
+@app.command("compare")
+def compare_cmd(
+    ctx: typer.Context,
+    names: Annotated[list[str], typer.Argument(help="Two or more player names.")],
+) -> None:
+    """Compare players side by side across every score component."""
+    from . import queries
+
+    cfg = get_config(ctx)
+    if len(names) < 2:
+        err_console.print("[red]Give at least two players to compare.[/red]")
+        raise typer.Exit(code=2)
+
+    board = _load_board(cfg, quiet=True)
+    with connect(cfg.paths.db_path) as db:
+        resolved = []
+        for name in names:
+            match = queries.resolve_one(db, name)
+            if match is None:
+                err_console.print(f"[red]Could not resolve[/red] {name!r} to one player.")
+                raise typer.Exit(code=1)
+            row = board.row(match["player_key"])
+            if row is None:
+                err_console.print(
+                    f"[yellow]{match['full_name']} is not on the modelled board[/yellow] "
+                    f"(position {match['position']})."
+                )
+                raise typer.Exit(code=1)
+            resolved.append(row)
+
+    table = Table(title="Comparison", header_style="bold", title_justify="left")
+    table.add_column("Metric", style="cyan")
+    for row in resolved:
+        table.add_column(f"{row['player_name']}\n{row['position']} · {row.get('team') or ''}",
+                         justify="right")
+
+    def add(label: str, key: str, digits: int = 1, suffix: str = "") -> None:
+        table.add_row(label, *[f"{_num(r.get(key), digits)}{suffix}" for r in resolved])
+
+    add("Board rank", "board_rank", 0)
+    add("Projected points", "projected_points")
+    add("VBD", "vbd")
+    add("Positional rank", "positional_rank", 0)
+    add("Tier", "tier", 0)
+    add("Points to next tier", "points_to_next_tier")
+    add("ADP", "adp")
+    table.add_section()
+    add("Player Score", "player_score")
+    add("Value Score", "value_score")
+    table.add_section()
+    add("  projection", "projection_score")
+    add("  vbd", "vbd_score")
+    add("  opportunity", "opportunity_score")
+    add("  offense", "offense_score")
+    add("  risk (inverted)", "risk_inverted_score")
+    add("  market value", "market_value_score")
+    add("  tier cliff", "tier_cliff_score")
+    add("  scarcity", "scarcity_score")
+    table.add_section()
+    add("Confidence", "player_score_confidence", 2)
+    console.print(table)
+
+    best = max(resolved, key=lambda r: r["player_score"])
+    margin = best["player_score"] - sorted(
+        (r["player_score"] for r in resolved), reverse=True
+    )[1]
+    verdict = (
+        f"[bold]{best['player_name']}[/bold] rates highest on season-long value "
+        f"(+{margin:.1f} Player Score)."
+    )
+    if margin < 2:
+        verdict += " That margin is inside the noise — treat them as equivalent."
+    console.print(Panel(verdict, border_style="cyan"))
+
+
+@app.command("explain")
+def explain_cmd(
+    ctx: typer.Context,
+    name: Annotated[str, typer.Argument(help="Player name.")],
+) -> None:
+    """Show every score component for one player, and how it was derived."""
+    from . import queries
+    from .scoring.player_score import player_score_bundle
+    from .scoring.value_score import value_score_bundle
+
+    cfg = get_config(ctx)
+    board = _load_board(cfg, quiet=True)
+    with connect(cfg.paths.db_path) as db:
+        match = queries.resolve_one(db, name)
+    if match is None:
+        err_console.print(f"[red]Could not resolve[/red] {name!r} to one player.")
+        raise typer.Exit(code=1)
+    row = board.row(match["player_key"])
+    if row is None:
+        err_console.print(f"[yellow]{match['full_name']} is not on the modelled board.[/yellow]")
+        raise typer.Exit(code=1)
+
+    console.print(
+        Panel(
+            Text.assemble(
+                (row["player_name"], "bold"), "  ",
+                (f"{row['position']} · {row.get('team') or ''} · board #{row['board_rank']}", "cyan"),
+            ),
+            border_style="cyan",
+        )
+    )
+
+    for bundle in (player_score_bundle(cfg, row), value_score_bundle(cfg, row)):
+        table = Table(
+            title=f"{bundle.name.replace('_', ' ').title()}  =  {bundle.value:.1f}"
+                  f"   (confidence {bundle.confidence * 100:.0f}%)",
+            header_style="bold", title_justify="left",
+        )
+        table.add_column("Component", style="cyan")
+        table.add_column("Raw", justify="right")
+        table.add_column("Score", justify="right")
+        table.add_column("Conf", justify="right")
+        table.add_column("Weight", justify="right")
+        table.add_column("Contributes", justify="right")
+        table.add_column("Method", overflow="fold", style="dim")
+        for key, comp in bundle.components.items():
+            weight = bundle.weights.get(key, 0.0)
+            known = comp.confidence > 0
+            table.add_row(
+                key,
+                _num(comp.raw_value, 1),
+                f"{comp.normalized:.1f}" if known else "[dim]unknown[/dim]",
+                f"{comp.confidence * 100:.0f}%",
+                f"{weight * 100:.1f}%" if weight else "[dim]—[/dim]",
+                f"{comp.normalized * weight:.1f}" if weight else "[dim]—[/dim]",
+                comp.method if known else comp.notes,
+            )
+        console.print(table)
+
+    dropped = [
+        key for key, comp in player_score_bundle(cfg, row).components.items()
+        if comp.confidence <= 0
+    ]
+    if dropped:
+        console.print(
+            f"[dim]Unknown components ({', '.join(dropped)}) had their weight "
+            f"redistributed across the rest rather than scored as average.[/dim]"
+        )
+
+    level = board.replacement.get(row["position"])
+    if level:
+        console.print(Panel(level.explanation, title="Replacement level", border_style="dim"))
+    entry = board.scarcity.get(row["position"])
+    if entry:
+        console.print(Panel(entry.explanation, title="Positional scarcity", border_style="dim"))
 
 
 def _num(value: float | None, digits: int = 0) -> str:
