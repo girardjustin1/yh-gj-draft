@@ -1,97 +1,134 @@
 # Human TODO
 
-Things the engine needs from you. Nothing here blocks development — defaults and
-fixtures keep everything running until you fill these in.
+Only what the engine genuinely needs from you. Nothing here blocks development — mock
+configuration and `ff draft mock` keep everything running until you fill these in.
 
-Last updated: 2026-08-31 (end of Phase 6)
+Last updated: 2026-08-31
 
 ---
 
-## REQUIRED — before `ff on-clock` can be trusted
+## 1. CHOOSE HOW THE DRAFT BOARD REACHES THE APP
 
-These are the settings that drive replacement level, VBD, scarcity, and roster fit. If
-they are wrong, every number downstream is wrong.
+Three paths. Pick one — you can change later.
 
-- [ ] **Copy the example config**: `cp config/league.example.yaml config/league.yaml`
-      (`config/league.yaml` is gitignored, so your league details stay local.)
-- [ ] **Number of teams** — currently `12`
-- [ ] **Scoring format** — currently half-PPR (`scoring.reception: 0.5`).
-      Set `0.0` for standard, `1.0` for full PPR.
-- [ ] **Passing TD value** — currently `4`. Some leagues use `6`.
-- [ ] **Starting roster requirements** — currently 1QB / 2RB / 2WR / 1TE / 1FLEX / 1K /
-      1DST / 6 bench. **Set `superflex: 1` if this is a superflex or 2QB league** — it
-      changes QB valuation more than any other single setting.
-- [ ] **Draft rounds** — currently `15`. Must equal starters + bench.
-- [ ] **Your draft slot** — currently unset. Required for snake pick math.
-      `ff draft sync` can fill this in automatically once Sleeper is connected (Phase 3).
+### A. Sleeper — works today, needs **no credentials at all** ✅
 
-Check your work with `ff config show` and `ff doctor`.
+Sleeper's read API is fully public. I need **only your public username**. No password,
+no token, no OAuth, nothing secret.
 
-## FASTEST PATH — if your league is on Sleeper, do this instead
-
-`ff sleeper use-league` reads your scoring rules, roster slots and draft format straight
-off the platform and writes them into `config/league.yaml`, which settles almost
-everything in the REQUIRED list above:
+- [ ] **Sleeper username** (the handle, not the display name), then:
 
 ```bash
-ff sleeper connect <your-sleeper-username>
+ff sleeper connect <username>     # resolves username -> public user_id
 ff sleeper leagues
-ff sleeper use-league <league_id>     # confirms before overwriting league.yaml
-ff config show                        # check it looks right
-ff draft sync                         # once the draft order is set, fills in your slot
+ff sleeper use-league <league_id> # reads scoring, roster slots, draft format
+ff draft sync                     # fills in your draft slot once the order is set
 ```
 
-- [ ] **Sleeper username** — it is the username, not the display name
-- [ ] **Select your league**
-- [ ] **Confirm the draft ID** if the league has more than one draft
-- [ ] **Confirm third-round reversal** — `use-league` detects Sleeper's reversal round,
-      but verify it. It changes which picks are yours.
+`use-league` writes your real settings into `config/league.yaml`, which settles most of
+section 2 below automatically. It asks before overwriting.
 
-## BEFORE DRAFT DAY
+> **Never send a password for any service.** Nothing in this project ever needs one.
 
-- [ ] Run `ff data refresh` (takes ~8 seconds; do **not** run it mid-draft)
-- [ ] Run `ff doctor` and clear any warnings
-- [ ] Rehearse with `ff draft mock --picks 40 --slot <yours>` then `ff on-clock`, so the
-      output is familiar before you are on a 90-second clock
+### B. Yahoo — needs an approved application, and that is no longer instant ⚠️
 
-## OPTIONAL — improves accuracy, not required
+Yahoo changed this: creating a developer app is **no longer sufficient by itself**.
+Fantasy API access now requires a manual review by Yahoo's team, and it is **read-only**.
+You submit your organisation, product, and use case — including saying it is personal or
+single-league use — and incomplete submissions are closed without correspondence.
 
-- [ ] **Import your own projections** — `ff import projections ./my-projections.csv`.
-      Any CSV/Parquet/JSON with a name column plus either `fantasy_points` or the
-      component stat columns. Multiple sources are kept separately and combined into a
-      consensus; nothing is overwritten.
-- [ ] **Import an additional ADP source** — `ff import adp ./adp.csv`. More independent
-      ADP sources tighten the survival model. FantasyPros ECR is already built in.
-- [ ] **Tell me your keepers**, if any — they change the available pool and every
-      opponent's roster needs.
-- [ ] **Tune scoring weights** — `config/scoring_weights.yaml`. The defaults are
-      defensible starting points, not settled truth. `ff config weights` shows them.
-      If you think the board over- or under-values a factor, the weight is the knob.
+- [ ] Apply at <https://sports.yahoo.com/developer/access/> and wait for approval
+- [ ] Once approved, give me:
+  - [ ] **Client ID** and **Client Secret** — I will put them in `.env`, which is
+        gitignored. Do not paste them into a chat you would not want logged.
+  - [ ] The **redirect URI** you registered (e.g. `https://localhost:8000/callback`)
+  - [ ] Your **league key**, in Yahoo's `<game_key>.l.<league_id>` form
+  - [ ] One **OAuth consent**: I generate a URL, you approve it in a browser and paste
+        the code back once. The refresh token is then stored locally.
 
-## NOT NEEDED — do not send these
+`YahooDraftProvider` exists as a stub that raises with these instructions rather than
+failing confusingly. Tell me when approval lands and I will implement it — the work
+itself is small; the approval is the slow part.
 
-- ❌ Passwords for any platform. Sleeper's public read API needs none.
-- ❌ Session cookies or auth tokens.
-- ❌ ESPN/Yahoo credentials. Those platforms are not implemented and won't be for MVP.
+**Given the approval delay, do not plan on Yahoo being ready for your draft.** Use C.
 
-## KNOWN LIMITATIONS — no action needed, but worth knowing
+### C. Manual entry — works with any platform, no integration at all ✅
 
-These are stated plainly here rather than hidden behind a confident-looking number:
+The pragmatic fallback for Yahoo, an in-person draft, or an API outage mid-draft. A
+manually entered pick produces exactly the same state a synced one does.
+
+```bash
+ff draft start --slot 7           # your draft slot
+ff draft pick "Ja'Marr Chase"     # after each selection, including other managers'
+ff draft undo                     # fix a mistake
+ff on-clock                       # when it is your turn
+```
+
+---
+
+## 2. LEAGUE SETTINGS
+
+These drive replacement level, VBD, scarcity and roster fit. If they are wrong, every
+number downstream is wrong. `ff sleeper use-league` fills them in automatically; set them
+by hand otherwise.
+
+- [ ] **Platform** — `sleeper`, `yahoo`, or `manual` in `config/league.yaml`
+- [ ] **Number of teams** — currently `12`
+- [ ] **Scoring** — currently half-PPR (`scoring.reception: 0.5`). Use `0.0` for
+      standard, `1.0` for full PPR
+- [ ] **Passing TD value** — currently `4`; some leagues use `6`
+- [ ] **Starting roster** — currently 1QB / 2RB / 2WR / 1TE / 1FLEX / 1K / 1DST
+- [ ] **FLEX / SUPERFLEX** — **set `superflex: 1` if this is a superflex or 2QB league.**
+      This changes QB valuation more than any other single setting.
+- [ ] **Bench size** — currently `6`. Starters + bench must equal `draft.rounds`
+- [ ] **Your draft slot** — currently unset. Required for the snake maths;
+      `ff draft sync` fills it in once the order exists
+
+Check with `ff config show` and `ff doctor`.
+
+---
+
+## 3. BEFORE DRAFT DAY
+
+- [ ] `ff data refresh` — about 8 seconds. **Do not run this mid-draft.**
+- [ ] `ff doctor` and clear any warnings
+- [ ] Rehearse: `ff draft mock --picks 40 --slot <yours>` then `ff on-clock`, so the
+      output is familiar before you are on a clock
+- [ ] Open the dashboard once: `ff serve` → <http://127.0.0.1:8000>
+
+---
+
+## 4. OPTIONAL — improves accuracy
+
+- [ ] **Your own projections** — `ff import projections ./file.csv`. Any CSV/Parquet/JSON
+      with a name column plus either `fantasy_points` or component stats. Imported
+      sources take precedence and are blended, never overwritten.
+- [ ] **A real ADP feed** — `ff import adp ./adp.csv`. We currently use FantasyPros
+      expert consensus rank as a proxy, and ECR is not ADP.
+- [ ] **Keepers**, if any — they change the pool and every opponent's roster needs.
+- [ ] **Tune weights** — `config/scoring_weights.yaml`, shown by `ff config weights`. The
+      defaults are defensible starting points, not settled truth.
+
+---
+
+## KNOWN LIMITATIONS
+
+Stated plainly rather than hidden behind a confident-looking number.
 
 - **Kickers and team defences are not modelled.** nflverse carries no team-defence
-  scoring and we do not ingest kicking stats, so there is no honest projection for them.
-  Draft them by consensus rank in the last two rounds; their value over replacement is
-  near zero either way.
+  scoring and we do not ingest kicking stats. Draft them by consensus rank in the last
+  two rounds; their value over replacement is near zero regardless.
 - **Projections come from a historical positional value curve**, not a per-player model:
   the market's ordering is mapped onto what each positional finish has historically been
-  worth in your scoring. It models the rank, not the player. Import your own projections
-  if you have better ones — they take precedence.
+  worth in your scoring. It models the rank, not the player.
+- **Floor / ceiling is an honest width, not a calibrated interval.** It combines expert
+  disagreement with the season-to-season variance of that positional finish, skewed by
+  injury and age risk. Read it as "roughly how wrong could this be".
 - **Schedule strength is deliberately low-confidence** (~0.36). Preseason
-  defence-vs-position rests on last year's personnel and is weak evidence.
-- **Bench multipliers in the replacement model are priors, not measurements.** Once
-  historical draft data is ingested they should be estimated rather than assumed.
-- **ADP is FantasyPros expert consensus rank**, used as a proxy. ECR is not ADP —
-  experts and drafters differ systematically, especially at QB and TE. Import a real ADP
-  feed with `ff import` and it takes precedence.
+  defence-vs-position rests on last year's personnel.
+- **Bench multipliers in the replacement model are priors, not measurements.**
+- **ADP is FantasyPros ECR used as a proxy.** Experts and drafters differ systematically,
+  especially at QB and TE.
 
-Nothing in this project transmits your league data anywhere. There is no telemetry.
+Nothing here transmits your league data anywhere. There is no telemetry. The dashboard
+binds to localhost.

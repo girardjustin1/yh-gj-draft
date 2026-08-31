@@ -1,0 +1,536 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fantasy Draft AI</title>
+<style>
+/* Designed for a 30-90 second clock: the recommendation must be readable in two
+   seconds, everything else is support. Colour is used only where it carries meaning
+   (urgency, holes in the lineup), never for decoration. */
+:root{
+  --bg:#0d1117; --panel:#151b23; --panel-2:#1c232c; --line:#2a323d;
+  --text:#e6edf3; --dim:#8b949e; --dimmer:#6e7681;
+  --accent:#4493f8; --good:#3fb950; --warn:#d29922; --bad:#f85149;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 var(--sans);}
+button{font:inherit;cursor:pointer}
+.wrap{max-width:1500px;margin:0 auto;padding:16px}
+
+/* ---- header ---- */
+header{display:flex;align-items:center;gap:16px;flex-wrap:wrap;
+  padding:12px 16px;background:var(--panel);border:1px solid var(--line);border-radius:10px}
+.brand{font-weight:700;letter-spacing:-.2px}
+.meta{color:var(--dim);font-size:12.5px}
+.meta b{color:var(--text);font-weight:600}
+.spacer{flex:1}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;
+  font-size:11.5px;background:var(--panel-2);border:1px solid var(--line);color:var(--dim)}
+.pill.ok{color:var(--good);border-color:#1f4b2a}
+.pill.bad{color:var(--bad);border-color:#5c2626}
+.pill.warn{color:var(--warn);border-color:#5c4a1a}
+.dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+
+#clockBtn{background:var(--accent);color:#06121f;border:0;border-radius:8px;
+  padding:11px 20px;font-weight:750;letter-spacing:.3px;font-size:14px}
+#clockBtn:hover{filter:brightness(1.1)}
+#clockBtn:disabled{opacity:.55;cursor:progress}
+
+/* ---- layout ---- */
+.grid{display:grid;gap:14px;margin-top:14px}
+.cols-2{grid-template-columns:1fr 1fr}
+.cols-roster{grid-template-columns:minmax(280px,340px) 1fr}
+@media(max-width:1050px){.cols-2,.cols-roster{grid-template-columns:1fr}}
+
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.card>h2{margin:0;padding:9px 14px;font-size:11px;letter-spacing:.9px;text-transform:uppercase;
+  color:var(--dim);background:var(--panel-2);border-bottom:1px solid var(--line);font-weight:650}
+.card>.body{padding:14px}
+.card.hero{border-color:#2d4a6b}
+
+/* ---- 1. on the clock ---- */
+.clockline{display:flex;gap:26px;flex-wrap:wrap;align-items:baseline;margin-bottom:12px}
+.pick{font-family:var(--mono);font-size:30px;font-weight:700;letter-spacing:-1px}
+.pick small{font-size:12px;color:var(--dim);font-weight:400;font-family:var(--sans)}
+.nextpick{color:var(--dim);font-size:13.5px}
+.nextpick b{color:var(--text);font-family:var(--mono)}
+.rec{display:flex;gap:22px;align-items:center;flex-wrap:wrap;
+  padding:14px;background:var(--panel-2);border-radius:9px;border:1px solid var(--line)}
+.recname{font-size:29px;font-weight:750;letter-spacing:-.6px;line-height:1.15}
+.recpos{color:var(--dim);font-size:13px;margin-top:2px}
+.stats{display:flex;gap:22px;margin-left:auto;flex-wrap:wrap}
+.stat{text-align:right;min-width:74px}
+.stat .v{font-family:var(--mono);font-size:23px;font-weight:700;line-height:1.1}
+.stat .k{font-size:10.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;margin-top:3px}
+.reason{margin-top:12px;color:#c9d5e0;font-size:13.5px;line-height:1.6}
+.alts{margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.alt{padding:5px 11px;border-radius:7px;background:var(--panel-2);border:1px solid var(--line);
+  font-size:12.5px;cursor:pointer}
+.alt:hover{border-color:var(--accent)}
+.alt b{font-family:var(--mono)}
+
+/* ---- 4. who makes it back ---- */
+.survrow{display:grid;grid-template-columns:1fr 46px;gap:10px;align-items:center;
+  padding:6px 0;border-bottom:1px solid #1e252e}
+.survrow:last-child{border-bottom:0}
+.survname{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.survname i{color:var(--dim);font-style:normal;font-size:11.5px}
+.bar{height:7px;border-radius:4px;background:#232b35;overflow:hidden;margin-top:4px}
+.bar>span{display:block;height:100%;border-radius:4px}
+.survpct{font-family:var(--mono);font-size:14px;text-align:right;font-weight:650}
+
+/* ---- 5. what if ---- */
+.whatif{display:grid;gap:9px}
+.wi{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;
+  padding:9px 11px;border-radius:8px;background:var(--panel-2);border:1px solid var(--line)}
+.wi.best{border-color:#2a5c36;background:#131f18}
+.wi .n{font-weight:620;font-size:13.5px}
+.wi .p{color:var(--dim);font-size:11.5px;font-family:var(--mono);margin-top:2px}
+.wi .c{font-family:var(--mono);font-size:19px;font-weight:700;text-align:right}
+.wi .d{font-size:11px;color:var(--dim);text-align:right;font-family:var(--mono)}
+
+/* ---- 2. best available ---- */
+.tools{display:flex;gap:6px;padding:9px 14px;border-bottom:1px solid var(--line);
+  flex-wrap:wrap;align-items:center;background:var(--panel)}
+.tab{padding:4px 12px;border-radius:6px;background:transparent;border:1px solid var(--line);
+  color:var(--dim);font-size:12.5px}
+.tab.on{background:var(--accent);border-color:var(--accent);color:#06121f;font-weight:650}
+select{background:var(--panel-2);color:var(--text);border:1px solid var(--line);
+  border-radius:6px;padding:4px 8px;font-size:12.5px}
+.scroll{max-height:460px;overflow:auto}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{position:sticky;top:0;background:var(--panel-2);text-align:right;padding:7px 9px;
+  font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--dim);
+  border-bottom:1px solid var(--line);white-space:nowrap;font-weight:650;z-index:1}
+th:nth-child(-n+3),td:nth-child(-n+3){text-align:left}
+td{padding:6px 9px;border-bottom:1px solid #1a212a;text-align:right;
+  font-family:var(--mono);white-space:nowrap}
+td.name{font-family:var(--sans);font-weight:560;max-width:190px;overflow:hidden;
+  text-overflow:ellipsis;cursor:pointer}
+td.name:hover{color:var(--accent)}
+tbody tr:hover{background:#1a212a}
+tr.picked td{opacity:.45}
+.chk{accent-color:var(--accent)}
+
+/* ---- 3. roster ---- */
+.slot{display:grid;grid-template-columns:52px 1fr;gap:9px;align-items:center;
+  padding:6px 9px;border-radius:7px;margin-bottom:4px;background:var(--panel-2)}
+.slot.empty{background:transparent;border:1px dashed #39424e}
+.slot .lbl{font-family:var(--mono);font-size:11px;color:var(--dim);font-weight:650}
+.slot .who{font-size:13px}
+.slot.empty .who{color:var(--dimmer);font-style:italic}
+.benchhead{font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--dim);
+  margin:12px 0 6px}
+
+/* ---- environment ---- */
+.envtable{width:100%;font-size:12.5px;border-collapse:collapse}
+.envtable td{padding:5px 8px;border-bottom:1px solid #1a212a}
+.envtable td:first-child{font-weight:650;font-family:var(--sans)}
+.minibar{height:6px;border-radius:3px;background:#232b35;overflow:hidden;min-width:70px}
+.minibar>span{display:block;height:100%}
+
+.muted{color:var(--dim);font-size:12px}
+.note{margin-top:10px;padding:8px 11px;border-radius:7px;background:#1d1a12;
+  border:1px solid #3d3418;color:#d7c98f;font-size:12px;line-height:1.55}
+.err{background:#2a1315;border-color:#5c2626;color:#f0b6b6}
+.empty{padding:26px 14px;text-align:center;color:var(--dim);font-size:13px}
+kbd{font-family:var(--mono);background:var(--panel-2);border:1px solid var(--line);
+  border-radius:4px;padding:1px 5px;font-size:11px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div>
+      <div class="brand">Fantasy Draft AI</div>
+      <div class="meta" id="leagueMeta">loading…</div>
+    </div>
+    <div class="spacer"></div>
+    <span class="pill" id="providerPill"><span class="dot"></span><span>provider</span></span>
+    <span class="pill" id="syncPill" hidden><span class="dot"></span><span>sync</span></span>
+    <button id="clockBtn">I'M ON THE CLOCK</button>
+  </header>
+
+  <div id="alerts"></div>
+
+  <!-- 1 -->
+  <div class="grid">
+    <section class="card hero">
+      <h2>1 · On the clock</h2>
+      <div class="body" id="clockBody">
+        <div class="empty">Press <kbd>I'M ON THE CLOCK</kbd> to analyse the current pick.</div>
+      </div>
+    </section>
+  </div>
+
+  <!-- 4 + 5 -->
+  <div class="grid cols-2">
+    <section class="card">
+      <h2>4 · Who makes it back to me?</h2>
+      <div class="body" id="survivalBody"><div class="empty">—</div></div>
+    </section>
+    <section class="card">
+      <h2>5 · What if I take…</h2>
+      <div class="body" id="whatIfBody"><div class="empty">—</div></div>
+    </section>
+  </div>
+
+  <!-- 2 -->
+  <div class="grid">
+    <section class="card">
+      <h2>2 · Best available</h2>
+      <div class="tools">
+        <span id="posTabs"></span>
+        <span class="spacer"></span>
+        <label class="muted">sort
+          <select id="sortSel">
+            <option value="draft_now">Draft Now</option>
+            <option value="player_score">Player Score</option>
+            <option value="vbd">VBD</option>
+            <option value="adp_value">ADP Value</option>
+            <option value="scarcity">Scarcity</option>
+            <option value="probability_gone">Probability Gone</option>
+            <option value="ceiling">Ceiling</option>
+            <option value="floor">Floor</option>
+            <option value="projection">Projection</option>
+          </select>
+        </label>
+      </div>
+      <div class="scroll"><table id="boardTable">
+        <thead><tr>
+          <th></th><th>Player</th><th>Pos</th><th>Tm</th><th>Tier</th>
+          <th>Draft&nbsp;Now</th><th>Player</th><th>Proj</th><th>VBD</th>
+          <th>ADP</th><th>ADP&nbsp;Val</th><th>Gone</th>
+          <th>Floor</th><th>Ceil</th><th>Shape</th>
+        </tr></thead>
+        <tbody><tr><td colspan="15" class="empty">—</td></tr></tbody>
+      </table></div>
+      <div class="body muted" id="compareHint" style="padding:9px 14px">
+        Tick two players to compare them across both picks.
+      </div>
+    </section>
+  </div>
+
+  <!-- 3 + environment -->
+  <div class="grid cols-roster">
+    <section class="card">
+      <h2>3 · My roster</h2>
+      <div class="body" id="rosterBody"><div class="empty">—</div></div>
+    </section>
+    <section class="card">
+      <h2>Draft environment</h2>
+      <div class="body" id="envBody"><div class="empty">—</div></div>
+    </section>
+  </div>
+
+  <div class="grid"><section class="card"><h2>Data health</h2>
+    <div class="body" id="healthBody"><div class="empty">—</div></div>
+  </section></div>
+
+</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const POSITIONS = ["ALL","QB","RB","WR","TE"];
+let LATEST = null, POS = "ALL", SORT = "draft_now", SELECTED = new Set();
+
+const fmt = (v, d = 1) => (v === null || v === undefined) ? "–" : Number(v).toFixed(d);
+const pct = (v) => (v === null || v === undefined) ? "–" : Math.round(v * 100) + "%";
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c =>
+  ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+
+/* Urgency colour: red = going soon. This is the one place colour carries meaning on the
+   board, so it is not used anywhere it would compete. */
+function urgencyColor(goneProb) {
+  if (goneProb === null || goneProb === undefined) return "var(--dimmer)";
+  if (goneProb >= 0.7) return "var(--bad)";
+  if (goneProb >= 0.4) return "var(--warn)";
+  return "var(--good)";
+}
+
+async function api(path, body) {
+  const res = await fetch(path, body ? {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  } : undefined);
+  const text = await res.text();
+  let data; try { data = JSON.parse(text); } catch { data = { detail: text }; }
+  if (!res.ok) throw new Error(data.detail || data.error || `HTTP ${res.status}`);
+  return data;
+}
+
+function alert_(html, cls = "note") {
+  $("alerts").insertAdjacentHTML("beforeend", `<div class="${cls}">${html}</div>`);
+}
+function clearAlerts() { $("alerts").innerHTML = ""; }
+
+/* ---------- config ---------- */
+async function loadConfig() {
+  try {
+    const c = await api("/api/config");
+    const L = c.league;
+    $("leagueMeta").innerHTML =
+      `<b>${esc(L.name)}</b> · ${L.teams}-team ${esc(L.scoring_type)}` +
+      (L.is_superflex ? " Superflex" : "") +
+      ` · ${L.rounds} rounds · slot <b>${L.slot ?? "not set"}</b>`;
+    const p = c.provider, pill = $("providerPill");
+    pill.className = "pill " + (p.connected ? "ok" : (p.implemented ? "warn" : "bad"));
+    pill.lastElementChild.textContent = p.platform + (p.connected ? " · connected" : " · not connected");
+    pill.title = p.detail;
+    if (!L.slot) {
+      alert_("Your <b>draft slot</b> is not set, so snake maths cannot run. " +
+             "Set <code>draft.slot</code> in <code>config/league.yaml</code>, or run " +
+             "<code>ff draft sync</code> once the order is known.");
+    }
+    if (!p.implemented) alert_(esc(p.detail), "note err");
+  } catch (e) { alert_("Could not load config: " + esc(e.message), "note err"); }
+}
+
+/* ---------- 1. on the clock ---------- */
+function renderClock(d) {
+  const o = d.on_the_clock, r = o.recommendation;
+  if (!r) { $("clockBody").innerHTML = `<div class="empty">No candidate could be scored.</div>`; return; }
+  const gone = r.probability_gone;
+  const alts = o.alternatives.map(a =>
+    `<span class="alt" data-key="${esc(a.player_key)}">${esc(a.name)} <i class="muted">${esc(a.position)}</i> <b>${fmt(a.draft_now)}</b></span>`
+  ).join("");
+
+  $("clockBody").innerHTML = `
+    <div class="clockline">
+      <div><div class="pick">${esc(o.pick_label)}</div><small>round ${o.round} · slot ${o.my_slot}</small></div>
+      <div class="nextpick">next pick <b>${esc(o.next_pick_label ?? "—")}</b><br>
+        ${o.picks_until_next !== null ? `<b>${o.picks_until_next}</b> picks away` : "last pick of the draft"}</div>
+      <div class="nextpick">strategy <b>${esc(o.strategy.current)}</b><br>
+        <span class="muted">${pct(o.strategy.confidence)} confident</span></div>
+    </div>
+    <div class="rec">
+      <div>
+        <div class="recname">${esc(r.name)}</div>
+        <div class="recpos">${esc(r.position)} · ${esc(r.team ?? "")}${r.bye_week ? " · bye " + r.bye_week : ""}${r.tier ? " · tier " + r.tier : ""}</div>
+      </div>
+      <div class="stats">
+        <div class="stat"><div class="v">${fmt(r.draft_now)}</div><div class="k">Draft Now</div></div>
+        <div class="stat"><div class="v">${fmt(r.player_score)}</div><div class="k">Player</div></div>
+        <div class="stat"><div class="v" style="color:${urgencyColor(gone)}">${pct(gone)}</div><div class="k">Gone by next</div></div>
+        <div class="stat"><div class="v">${pct(o.confidence)}</div><div class="k">Confidence</div></div>
+      </div>
+    </div>
+    <div class="reason">${esc(o.reason)}</div>
+    ${alts ? `<div class="alts"><span class="muted">Alternatives:</span>${alts}</div>` : ""}`;
+
+  $("clockBody").querySelectorAll(".alt").forEach(el =>
+    el.onclick = () => { toggleSelect(el.dataset.key); });
+}
+
+/* ---------- 4. who makes it back ---------- */
+function renderSurvival(d) {
+  const rows = d.who_makes_it_back;
+  if (!rows.length) {
+    $("survivalBody").innerHTML = `<div class="empty">No next pick — this is our last selection.</div>`;
+    return;
+  }
+  $("survivalBody").innerHTML = rows.map(r => {
+    const p = r.probability_available;
+    return `<div class="survrow">
+      <div>
+        <div class="survname">${esc(r.name)} <i>${esc(r.position)} · ${esc(r.team ?? "")}</i></div>
+        <div class="bar"><span style="width:${Math.round(p*100)}%;background:${urgencyColor(r.probability_gone)}"></span></div>
+      </div>
+      <div class="survpct" style="color:${urgencyColor(r.probability_gone)}">${pct(p)}</div>
+    </div>`;
+  }).join("") +
+  `<div class="muted" style="margin-top:10px">Chance the player is still on the board at
+   <b>${esc(d.on_the_clock.next_pick_label ?? "—")}</b>, from opponent roster needs plus
+   ${d.simulation ? d.simulation.iterations.toLocaleString() + " simulations" : "the ADP model"}.</div>`;
+}
+
+/* ---------- 5. what if ---------- */
+function renderWhatIf(d) {
+  const rows = d.what_if;
+  if (!rows.length) {
+    $("whatIfBody").innerHTML = `<div class="empty">Run with simulation enabled to price both picks.</div>`;
+    return;
+  }
+  $("whatIfBody").innerHTML = `<div class="whatif">` + rows.map((r, i) => `
+    <div class="wi ${i === 0 ? "best" : ""}">
+      <div>
+        <div class="n">${esc(r.name)}</div>
+        <div class="p">${fmt(r.value_now)} now + ${fmt(r.expected_next_value)} at next pick
+          → likely ${esc(r.likely_next_position ?? "?")}</div>
+      </div>
+      <div>
+        <div class="c">${fmt(r.combined)}</div>
+        <div class="d">${i === 0 ? "best path" : fmt(r.delta_vs_best) }</div>
+      </div>
+    </div>`).join("") + `</div>
+    <div class="muted" style="margin-top:10px">Combined value of this pick plus the best
+    player expected to survive to our next one.</div>`;
+}
+
+/* ---------- 2. best available ---------- */
+function renderTabs() {
+  $("posTabs").innerHTML = POSITIONS.map(p =>
+    `<button class="tab ${p === POS ? "on" : ""}" data-pos="${p}">${p}</button>`).join(" ");
+  $("posTabs").querySelectorAll(".tab").forEach(b =>
+    b.onclick = () => { POS = b.dataset.pos; renderTabs(); renderBoard(); });
+}
+
+function renderBoard() {
+  const body = $("boardTable").querySelector("tbody");
+  if (!LATEST) { body.innerHTML = `<tr><td colspan="15" class="empty">—</td></tr>`; return; }
+  let rows = LATEST.best_available.slice();
+  if (POS !== "ALL") rows = rows.filter(r => r.position === POS);
+
+  const dir = (SORT === "adp" || SORT === "probability_gone") ? 1 : -1;
+  rows.sort((a, b) => {
+    const x = a[SORT] ?? -Infinity, y = b[SORT] ?? -Infinity;
+    return SORT === "probability_gone" ? (y - x) : (x - y) * dir;
+  });
+
+  body.innerHTML = rows.slice(0, 80).map(r => `
+    <tr data-key="${esc(r.player_key)}">
+      <td><input type="checkbox" class="chk" data-key="${esc(r.player_key)}"
+        ${SELECTED.has(r.player_key) ? "checked" : ""}></td>
+      <td class="name" title="${esc(r.name)}">${esc(r.name)}</td>
+      <td>${esc(r.position)}</td>
+      <td class="muted">${esc(r.team ?? "")}</td>
+      <td>${r.tier ?? "–"}</td>
+      <td><b>${fmt(r.draft_now)}</b></td>
+      <td>${fmt(r.player_score)}</td>
+      <td>${fmt(r.projection, 0)}</td>
+      <td>${fmt(r.vbd, 0)}</td>
+      <td>${fmt(r.adp)}</td>
+      <td style="color:${(r.adp_value ?? 0) > 0 ? "var(--good)" : "var(--dim)"}">${r.adp_value === null ? "–" : (r.adp_value > 0 ? "+" : "") + fmt(r.adp_value, 0)}</td>
+      <td style="color:${urgencyColor(r.probability_gone)}">${pct(r.probability_gone)}</td>
+      <td class="muted">${fmt(r.floor, 0)}</td>
+      <td class="muted">${fmt(r.ceiling, 0)}</td>
+      <td class="muted" style="font-family:var(--sans)">${esc(r.outcome)}</td>
+    </tr>`).join("") || `<tr><td colspan="15" class="empty">No players at this position.</td></tr>`;
+
+  body.querySelectorAll(".chk").forEach(c => c.onchange = () => toggleSelect(c.dataset.key));
+  body.querySelectorAll("td.name").forEach(c =>
+    c.onclick = () => toggleSelect(c.parentElement.dataset.key));
+}
+
+function toggleSelect(key) {
+  if (SELECTED.has(key)) SELECTED.delete(key); else SELECTED.add(key);
+  if (SELECTED.size > 2) SELECTED.delete(SELECTED.values().next().value);
+  renderBoard();
+  updateCompare();
+}
+
+async function updateCompare() {
+  const hint = $("compareHint");
+  if (SELECTED.size < 2) {
+    hint.innerHTML = SELECTED.size === 1
+      ? "One selected — tick one more to compare across both picks."
+      : "Tick two players to compare them across both picks.";
+    return;
+  }
+  hint.textContent = "Comparing…";
+  try {
+    const d = await api("/api/compare", { player_keys: [...SELECTED], refresh: false });
+    const best = d.winner;
+    hint.innerHTML = d.paths.map(p =>
+      `<span style="margin-right:20px">${p.player_key === best ? "★ " : ""}<b>${esc(p.name)}</b>
+       ${fmt(p.value_now)} + ${fmt(p.expected_next_value)} =
+       <b>${fmt(p.combined)}</b> <span class="muted">(→ ${esc(p.likely_next_position ?? "?")})</span></span>`
+    ).join("") + (d.margin !== null && d.winner_name
+      ? `<div style="margin-top:6px">Recommendation: <b>${esc(d.winner_name)}</b>, +${fmt(d.margin)} expected value across both picks.</div>`
+      : "");
+  } catch (e) { hint.innerHTML = `<span style="color:var(--bad)">${esc(e.message)}</span>`; }
+}
+
+/* ---------- 3. roster ---------- */
+function renderRoster(d) {
+  const r = d.my_roster;
+  const slots = r.starters.map(s => `
+    <div class="slot ${s.filled ? "" : "empty"}">
+      <div class="lbl">${esc(s.slot)}</div>
+      <div class="who">${s.filled ? esc(s.name) + ` <span class="muted">${esc(s.team ?? "")}</span>` : "—"}</div>
+    </div>`).join("");
+  const bench = r.bench.length
+    ? `<div class="benchhead">Bench (${r.bench.length})</div>` + r.bench.map(s => `
+        <div class="slot"><div class="lbl">${esc(s.position ?? "BN")}</div>
+        <div class="who">${esc(s.name)}</div></div>`).join("")
+    : "";
+  $("rosterBody").innerHTML = slots + bench +
+    `<div class="muted" style="margin-top:10px">${r.size} drafted ·
+      ${r.unfilled_starters.length} starting slot${r.unfilled_starters.length === 1 ? "" : "s"} to fill</div>`;
+}
+
+/* ---------- environment ---------- */
+function renderEnv(d) {
+  const env = d.draft_environment;
+  const rows = ["QB","RB","WR","TE"].filter(p => env[p]).map(p => {
+    const e = env[p];
+    return `<tr>
+      <td>${p}</td>
+      <td style="width:110px"><div class="minibar"><span style="width:${Math.round(e.demand)}%;background:var(--accent)"></span></div></td>
+      <td>${fmt(e.demand, 0)}</td>
+      <td class="muted">${fmt(e.expected_gone_before_next_pick, 1)} gone</td>
+      <td class="muted">${e.startable_available} startable</td>
+      <td class="muted">value ${fmt(e.value_created, 0)}</td>
+    </tr>`;
+  }).join("");
+  $("envBody").innerHTML = `<table class="envtable">
+    <tr><th style="text-align:left">Pos</th><th colspan="2" style="text-align:left">Demand</th>
+    <th style="text-align:left">Before our pick</th><th style="text-align:left">Supply</th>
+    <th style="text-align:left">Falling to us</th></tr>${rows}</table>
+    <div class="muted" style="margin-top:9px">High demand drains a position; high
+    "falling to us" means the room is ignoring it and value is accumulating there.</div>`;
+}
+
+/* ---------- health ---------- */
+function renderHealth(d) {
+  const stale = d.staleness.map(s =>
+    `<span class="pill ${s.stale ? "warn" : "ok"}"><span class="dot"></span>${esc(s.source)}
+     ${s.age_hours === null ? "never" : s.age_hours < 1 ? Math.round(s.age_hours*60)+"m" : s.age_hours.toFixed(1)+"h"}</span>`
+  ).join(" ");
+  const warns = d.warnings.map(w => `<div class="note">${esc(w)}</div>`).join("");
+  $("healthBody").innerHTML = `<div style="display:flex;gap:7px;flex-wrap:wrap">${stale}</div>` + warns +
+    (d.simulation ? `<div class="muted" style="margin-top:9px">${d.simulation.iterations.toLocaleString()}
+      simulations of ${d.simulation.picks_simulated} picks (seed ${d.simulation.seed}). ${esc(d.simulation.approximation)}</div>` : "");
+}
+
+/* ---------- main action ---------- */
+async function onTheClock() {
+  const btn = $("clockBtn");
+  btn.disabled = true; btn.textContent = "ANALYSING…";
+  clearAlerts();
+  try {
+    const d = await api("/api/on-clock", { refresh: true, simulate: true, limit: 120 });
+    LATEST = d;
+    renderClock(d); renderSurvival(d); renderWhatIf(d);
+    renderBoard(); renderRoster(d); renderEnv(d); renderHealth(d);
+
+    const pill = $("syncPill"); pill.hidden = false;
+    pill.className = "pill " + (d.stale ? "warn" : (d.synced ? "ok" : "warn"));
+    pill.lastElementChild.textContent = d.synced ? "live" : (d.stale ? "stale board" : "stored board");
+    pill.title = d.sync_error ?? "";
+    if (d.sync_error) {
+      alert_(`Live sync did not run (<code>${esc(d.sync_error)}</code>). Using the stored
+        board — treat it as stale if the draft has moved.`);
+    }
+    SELECTED.clear(); updateCompare();
+  } catch (e) {
+    alert_("<b>Could not analyse the pick.</b><br>" + esc(e.message), "note err");
+  } finally {
+    btn.disabled = false; btn.textContent = "I'M ON THE CLOCK";
+  }
+}
+
+$("clockBtn").onclick = onTheClock;
+$("sortSel").onchange = (e) => { SORT = e.target.value; renderBoard(); };
+document.addEventListener("keydown", (e) => {
+  if (e.key.toLowerCase() === "c" && !/input|select|textarea/i.test(e.target.tagName)) onTheClock();
+});
+renderTabs();
+loadConfig();
+</script>
+</body>
+</html>

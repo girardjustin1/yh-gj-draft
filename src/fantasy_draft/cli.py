@@ -1075,6 +1075,110 @@ def draft_status(
         console.print(every)
 
 
+@draft_app.command("start")
+def draft_start(
+    ctx: typer.Context,
+    draft_id: Annotated[str, typer.Option("--draft-id")] = "manual-draft",
+    slot: Annotated[int | None, typer.Option("--slot", help="Your draft slot.")] = None,
+) -> None:
+    """Start an empty draft you enter by hand.
+
+    The fallback when the platform cannot be read live — Yahoo, an in-person draft, or an
+    API outage. Manually entered picks produce exactly the same state a live sync does.
+    """
+    from .draft.store import create_manual_draft
+
+    cfg = get_config(ctx)
+    league = cfg.league
+    if slot is not None:
+        league = league.model_copy(update={"draft": league.draft.model_copy(update={"slot": slot})})
+    if league.draft.slot is None:
+        err_console.print(
+            "[red]No draft slot.[/red] Pass [bold]--slot N[/bold] or set "
+            "[bold]draft.slot[/bold] in config/league.yaml."
+        )
+        raise typer.Exit(code=2)
+
+    with connect(cfg.paths.db_path) as db:
+        state = create_manual_draft(db, league, draft_id=draft_id)
+    console.print(
+        f"{OK} started [bold]{draft_id}[/bold] — {state.board.teams} teams, "
+        f"{state.board.rounds} rounds, you are slot [bold]{state.my_slot}[/bold]"
+    )
+    console.print(
+        "Record each selection as it happens with [bold]ff draft pick \"Player Name\"[/bold], "
+        "then run [bold]ff on-clock[/bold] when it is your turn."
+    )
+
+
+@draft_app.command("pick")
+def draft_pick(
+    ctx: typer.Context,
+    name: Annotated[str, typer.Argument(help="Player just selected.")],
+    draft_id: Annotated[str | None, typer.Option("--draft-id")] = None,
+) -> None:
+    """Record a selection by hand."""
+    from . import queries
+    from .draft.store import load_state, record_pick
+
+    cfg = get_config(ctx)
+    with connect(cfg.paths.db_path) as db:
+        state = load_state(db, draft_id)
+        if state is None:
+            err_console.print("No draft. Run [bold]ff draft start[/bold] first.")
+            raise typer.Exit(code=1)
+
+        match = queries.resolve_one(db, name)
+        if match is None:
+            err_console.print(
+                f"[red]Could not resolve[/red] {name!r} to exactly one player. "
+                "Try a fuller name."
+            )
+            raise typer.Exit(code=1)
+
+        try:
+            state = record_pick(
+                db, state, match["player_key"], match["full_name"],
+                match["position"], match["team"],
+            )
+        except ValueError as exc:
+            err_console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=1) from exc
+
+        last = state.picks[-1]
+
+    marker = " [bold green]← yours[/bold green]" if last.slot == state.my_slot else ""
+    console.print(
+        f"{OK} {state.board.label(last.overall)} slot {last.slot}: "
+        f"[bold]{last.player_name}[/bold] ({last.position}, {last.nfl_team}){marker}"
+    )
+    if state.is_my_pick:
+        console.print("\n[bold green]YOU ARE ON THE CLOCK[/bold green] — run [bold]ff on-clock[/bold]")
+    elif state.picks_until_my_turn is not None:
+        console.print(f"[dim]{state.picks_until_my_turn} picks until your turn.[/dim]")
+
+
+@draft_app.command("undo")
+def draft_undo(
+    ctx: typer.Context,
+    draft_id: Annotated[str | None, typer.Option("--draft-id")] = None,
+) -> None:
+    """Remove the most recently recorded selection."""
+    from .draft.store import load_state, undo_pick
+
+    cfg = get_config(ctx)
+    with connect(cfg.paths.db_path) as db:
+        state = load_state(db, draft_id)
+        if state is None:
+            err_console.print("No draft to undo.")
+            raise typer.Exit(code=1)
+        removed = undo_pick(db, state)
+    if removed is None:
+        console.print("[yellow]No picks recorded yet.[/yellow]")
+        return
+    console.print(f"{OK} removed {removed.player_name} — back to pick {state.pick_label}")
+
+
 @draft_app.command("mock")
 def draft_mock(
     ctx: typer.Context,
@@ -1128,220 +1232,240 @@ def _bar(value: float, width: int = 12) -> str:
 def on_clock(
     ctx: typer.Context,
     draft_id: Annotated[str | None, typer.Option("--draft-id")] = None,
-    limit: Annotated[int, typer.Option("--limit", "-n", help="Candidates to show.")] = 6,
-    sync: Annotated[bool, typer.Option("--sync/--no-sync", help="Refresh from Sleeper first.")] = False,
+    limit: Annotated[int, typer.Option("--limit", "-n", help="Candidates to show.")] = 8,
+    sync: Annotated[bool, typer.Option("--sync/--no-sync", help="Refresh from the platform first.")] = True,
     simulate: Annotated[
         bool, typer.Option("--simulate/--no-simulate", help="Run the Monte Carlo two-pick model.")
     ] = True,
     iterations: Annotated[
         int | None, typer.Option("--iterations", help="Simulation runs. Default from config.")
     ] = None,
-    json_out: Annotated[bool, typer.Option("--json", help="Emit compact JSON instead.")] = False,
+    position: Annotated[
+        str | None, typer.Option("--position", "-p", help="Filter BEST AVAILABLE.")
+    ] = None,
+    json_out: Annotated[bool, typer.Option("--json", help="Emit the full JSON contract.")] = False,
 ) -> None:
-    """The recommendation: who should I draft right now?"""
-    from .data.sleeper import SleeperError, source_freshness
-    from .draft.store import load_state, save_state
-    from .recommendation.ranker import recommend
+    """The recommendation: who should I draft right now?
+
+    Goes through the same `analyze_current_pick()` the dashboard and Claude use, so all
+    three can never disagree.
+    """
+    from .service import ServiceError, analyze_current_pick
 
     cfg = get_config(ctx)
     with connect(cfg.paths.db_path) as db:
-        if sync:
-            from .draft.providers import SleeperDraftProvider
+        try:
+            with console.status("[cyan]Analysing...", spinner="dots"):
+                analysis = analyze_current_pick(
+                    cfg, db, draft_id=draft_id, refresh=sync,
+                    simulate=simulate, iterations=iterations, limit=max(limit, 6),
+                )
+        except ServiceError as exc:
+            err_console.print(Panel(str(exc), title="Cannot analyse", border_style="red"))
+            raise typer.Exit(code=1) from exc
 
-            try:
-                target = _resolve_draft_id(cfg, db, draft_id)
-                state = SleeperDraftProvider(cfg, db).fetch_state(target)
-                save_state(db, state)
-            except (SleeperError, typer.Exit) as exc:
-                console.print(f"[yellow]Sync failed ({exc}); using the last synced board.[/yellow]")
-                state = load_state(db, draft_id)
-        else:
-            state = load_state(db, draft_id)
-
-        if state is None:
-            err_console.print(
-                "No draft available. Run [bold]ff draft sync[/bold] for a live draft, "
-                "or [bold]ff draft mock[/bold] to practise."
-            )
-            raise typer.Exit(code=1)
-
-        if state.my_slot is None:
-            err_console.print(
-                "[red]Your draft slot is unknown[/red], so snake math cannot run.\n"
-                "Set [bold]draft.slot[/bold] in config/league.yaml or run "
-                "[bold]ff draft sync[/bold] once the order is set."
-            )
-            raise typer.Exit(code=1)
-
-        with console.status("[cyan]Thinking...", spinner="dots"):
-            result = recommend(
-                db, cfg, state, limit=max(limit, 6),
-                simulate=simulate, iterations=iterations,
-            )
-
-    rec = result.recommendation
     if json_out:
         import json
 
-        console.print_json(
-            json.dumps(
-                {
-                    "pick": rec.pick_label,
-                    "overall_pick": rec.overall_pick,
-                    "next_pick": rec.next_pick_overall,
-                    "picks_until_next": rec.picks_until_next,
-                    "strategy": rec.strategy.value,
-                    "strategy_confidence": round(rec.strategy_confidence, 3),
-                    "confidence": round(rec.confidence, 3),
-                    "position_demand": rec.position_demand,
-                    "simulation": (
-                        {
-                            "iterations": result.simulation.iterations,
-                            "picks_simulated": result.simulation.picks_simulated,
-                            "seed": result.simulation.seed,
-                            "approximation": result.simulation.approximation_note,
-                        }
-                        if result.simulation
-                        else None
-                    ),
-                    "recommendation": rec.primary.summary() if rec.primary else None,
-                    "alternatives": [c.summary() for c in rec.alternatives],
-                    "board": [c.summary() for c in rec.board],
-                    "warnings": rec.warnings,
-                    "explanation": rec.explanation,
-                }
-            )
-        )
+        console.print_json(json.dumps(analysis.to_dict(board_limit=limit)))
         return
 
-    stale_sync = (datetime.now() - state.synced_at).total_seconds() > 180
+    _render_on_clock(analysis, limit=limit, position=position)
 
-    # --- header ---
+
+def _render_on_clock(analysis, limit: int = 8, position: str | None = None) -> None:
+    """The five areas, in the order they matter on a 90-second clock."""
+    otc = analysis.on_the_clock()
+    rec = otc["recommendation"]
+
+    # ---- 1. ON THE CLOCK -------------------------------------------------------------
     console.print()
-    console.rule("[bold]ON THE CLOCK[/bold]", style="cyan")
-    header = Table(show_header=False, box=None, padding=(0, 2, 0, 0))
+    console.rule("[bold]1 · ON THE CLOCK[/bold]", style="cyan")
+
+    header = Table(show_header=False, box=None, padding=(0, 3, 0, 0))
     header.add_column(style="dim", no_wrap=True)
     header.add_column()
-    header.add_row("League", f"{cfg.league.name} — {cfg.league.label}")
-    header.add_row("Pick", f"[bold]{rec.pick_label}[/bold] (overall {rec.overall_pick})")
-    if rec.next_pick_overall:
+    header.add_row("Pick", f"[bold]{otc['pick_label']}[/bold]  (overall {otc['overall_pick']}, slot {otc['my_slot']})")
+    if otc["next_pick_label"]:
         header.add_row(
             "Next pick",
-            f"{state.board.label(rec.next_pick_overall)} "
-            f"(overall {rec.next_pick_overall}) — "
-            f"[bold]{rec.picks_until_next}[/bold] picks away",
+            f"[bold]{otc['next_pick_label']}[/bold]  —  "
+            f"[bold]{otc['picks_until_next']}[/bold] picks away",
         )
     else:
         header.add_row("Next pick", "[dim]this is our last pick[/dim]")
-    header.add_row(
-        "Draft synced",
-        f"[{'yellow' if stale_sync else 'dim'}]{source_freshness(state.synced_at)}"
-        f"{' — run `ff draft sync`' if stale_sync else ''}[/]",
-    )
+    header.add_row("Strategy", f"{otc['strategy']['current']}  [dim]({otc['strategy']['why']})[/dim]")
+    source = analysis.provider + (" · live" if analysis.synced else " · stored board")
+    header.add_row("Source", f"[{'yellow' if analysis.is_stale else 'dim'}]{source}[/]")
     console.print(header)
 
-    # --- our roster ---
-    roster = state.my_roster()
-    if roster and roster.player_keys:
-        lines = []
-        for pick in state.picks:
-            if pick.player_key in roster.player_keys:
-                lines.append(
-                    f"[cyan]{(pick.position or '?'):<4}[/cyan]{pick.player_name or pick.player_key}"
-                )
-        console.print(Panel("\n".join(lines), title="Current roster", border_style="dim"))
+    if rec is None:
+        console.print("[red]No candidate could be scored.[/red]")
     else:
-        console.print(Panel("[dim]empty[/dim]", title="Current roster", border_style="dim"))
-
-    # --- draft environment ---
-    env = Table(title="Draft environment", header_style="bold", title_justify="left")
-    env.add_column("Pos", style="cyan")
-    env.add_column("Demand", justify="right")
-    env.add_column("", no_wrap=True)
-    env.add_column("Run", justify="right")
-    env.add_column("Value falling to us", justify="right")
-    env.add_column("Expected gone before our pick", justify="right")
-    for position in ("QB", "RB", "WR", "TE"):
-        demand = result.room.demand.get(position, 50.0)
-        env.add_row(
-            position,
-            f"{demand:.0f}",
-            _bar(demand),
-            f"{result.room.run_intensity.get(position, 0):.0f}",
-            f"{result.room.value_created.get(position, 50):.0f}",
-            f"{result.survival.expected_position_losses.get(position, 0):.1f}",
+        gone = rec["probability_gone"]
+        gone_text = (
+            f"[red]{gone * 100:.0f}%[/red]" if gone and gone >= 0.7
+            else (f"[yellow]{gone * 100:.0f}%[/yellow]" if gone and gone >= 0.4
+                  else f"[green]{gone * 100:.0f}%[/green]") if gone is not None else "?"
         )
-    console.print(env)
-
-    console.print(
-        f"Strategy: [bold]{result.strategy.label}[/bold] "
-        f"[dim](confidence {result.strategy.confidence * 100:.0f}% — "
-        f"{result.strategy.reason})[/dim]\n"
-    )
-
-    # --- candidates ---
-    table = Table(title="Top candidates", header_style="bold", title_justify="left")
-    table.add_column("#", justify="right", style="dim", no_wrap=True)
-    table.add_column("Player", no_wrap=True, min_width=18)
-    table.add_column("Pos", justify="center", no_wrap=True)
-    table.add_column("Tier", justify="center", no_wrap=True)
-    table.add_column("Draft Now", justify="right", no_wrap=True)
-    table.add_column("Player", justify="right", no_wrap=True)
-    table.add_column("Value", justify="right", no_wrap=True)
-    table.add_column("ADP", justify="right", no_wrap=True)
-    table.add_column("Gone by next", justify="right", no_wrap=True)
-    if any(c.two_pick_expected_value is not None for c in rec.board[:limit]):
-        table.add_column("2-pick EV", justify="right", no_wrap=True)
-    for i, candidate in enumerate(rec.board[:limit], start=1):
-        gone = candidate.survival.probability_gone if candidate.survival else None
-        gone_text = "[dim]?[/dim]" if gone is None else (
-            f"[red]{gone * 100:.0f}%[/red]" if gone >= 0.7
-            else (f"[yellow]{gone * 100:.0f}%[/yellow]" if gone >= 0.4
-                  else f"[green]{gone * 100:.0f}%[/green]")
+        console.print()
+        console.rule(f"[bold green]TAKE {rec['name'].upper()}[/bold green]", style="green")
+        summary = Table(show_header=False, box=None, padding=(0, 4, 0, 0))
+        for _ in range(4):
+            summary.add_column(justify="center")
+        summary.add_row(
+            f"[bold]{rec['draft_now']}[/bold]", f"[bold]{rec['player_score']}[/bold]",
+            gone_text, f"[bold]{otc['confidence'] * 100:.0f}%[/bold]",
         )
-        row = [
-            str(i),
-            f"[bold]{candidate.name}[/bold]" if i == 1 else candidate.name,
-            candidate.position,
-            str(candidate.tier or ""),
-            f"[bold]{candidate.draft_now:.1f}[/bold]",
-            f"{candidate.player_score.value:.1f}" if candidate.player_score else "",
-            f"{candidate.value_score.value:.1f}" if candidate.value_score else "",
-            _num(candidate.adp, 1),
-            gone_text,
-        ]
-        if len(table.columns) == 10:
-            row.append(
-                f"{candidate.two_pick_expected_value:.1f}"
-                if candidate.two_pick_expected_value is not None else "[dim]-[/dim]"
-            )
-        table.add_row(*row)
-    console.print(table)
-    if result.simulation and result.simulation.iterations:
-        console.print(
-            f"[dim]2-pick EV = this player's value plus the simulated best available at "
-            f"our next pick, over {result.simulation.iterations:,} runs "
-            f"(seed {result.simulation.seed}).[/dim]"
+        summary.add_row(
+            "[dim]DRAFT NOW[/dim]", "[dim]PLAYER[/dim]",
+            "[dim]GONE BY NEXT[/dim]", "[dim]CONFIDENCE[/dim]",
         )
-
-    # --- the recommendation ---
-    if rec.primary:
+        console.print(summary)
         console.print()
-        console.rule(f"[bold green]TAKE {rec.primary.name.upper()}[/bold green]", style="green")
-        console.print()
-        console.print(rec.explanation)
-        console.print()
-        if rec.alternatives:
+        console.print(otc["reason"])
+        if otc["alternatives"]:
             console.print(
-                "[dim]Alternatives: "
+                "\n[dim]Alternatives: "
                 + "  ·  ".join(
-                    f"{c.name} ({c.position}, Draft Now {c.draft_now:.1f})"
-                    for c in rec.alternatives
+                    f"{a['name']} ({a['position']}, {a['draft_now']})"
+                    for a in otc["alternatives"]
                 )
                 + "[/dim]"
             )
 
-    for warning in rec.warnings:
+    # ---- 4. WHO MAKES IT BACK TO ME --------------------------------------------------
+    survival = analysis.who_makes_it_back(limit=limit)
+    if survival:
+        console.print()
+        console.rule("[bold]4 · WHO MAKES IT BACK TO ME?[/bold]", style="cyan")
+        table = Table(header_style="bold", box=None)
+        table.add_column("Player", no_wrap=True, min_width=20)
+        table.add_column("Pos", justify="center")
+        table.add_column("Available at next pick", justify="right")
+        table.add_column("", no_wrap=True)
+        for row in survival:
+            available = row["probability_available"]
+            colour = "red" if available < 0.3 else ("yellow" if available < 0.6 else "green")
+            filled = int(round(available * 18))
+            table.add_row(
+                row["name"], row["position"],
+                f"[{colour}]{available * 100:.0f}%[/{colour}]",
+                f"[{colour}]{'█' * filled}[/{colour}][dim]{'░' * (18 - filled)}[/dim]",
+            )
+        console.print(table)
+
+    # ---- 5. WHAT IF ------------------------------------------------------------------
+    what_if = analysis.what_if()
+    if what_if:
+        console.print()
+        console.rule("[bold]5 · WHAT IF I TAKE…[/bold]", style="cyan")
+        table = Table(header_style="bold", box=None)
+        table.add_column("Take now", no_wrap=True, min_width=20)
+        table.add_column("Value now", justify="right")
+        table.add_column("Expected next", justify="right")
+        table.add_column("Combined", justify="right")
+        table.add_column("Likely next", justify="center")
+        table.add_column("vs best", justify="right", style="dim")
+        for i, row in enumerate(what_if):
+            name = f"[bold]{row['name']}[/bold]" if i == 0 else row["name"]
+            table.add_row(
+                name, f"{row['value_now']}", f"{row['expected_next_value']}",
+                f"[bold]{row['combined']}[/bold]" if i == 0 else f"{row['combined']}",
+                row["likely_next_position"] or "",
+                "best path" if i == 0 else f"{row['delta_vs_best']}",
+            )
+        console.print(table)
+
+    # ---- 2. BEST AVAILABLE -----------------------------------------------------------
+    rows = analysis.best_available(limit=limit, position=position)
+    if rows:
+        console.print()
+        title = "2 · BEST AVAILABLE" + (f" — {position.upper()}" if position else "")
+        console.rule(f"[bold]{title}[/bold]", style="cyan")
+        table = Table(header_style="bold", box=None)
+        table.add_column("#", justify="right", style="dim", no_wrap=True)
+        table.add_column("Player", no_wrap=True, min_width=18)
+        table.add_column("Pos", justify="center", no_wrap=True)
+        table.add_column("Tm", justify="center", style="dim", no_wrap=True)
+        table.add_column("Tier", justify="center", no_wrap=True)
+        table.add_column("Draft Now", justify="right", no_wrap=True)
+        table.add_column("Proj", justify="right", no_wrap=True)
+        table.add_column("VBD", justify="right", no_wrap=True)
+        table.add_column("ADP", justify="right", no_wrap=True)
+        table.add_column("Gone", justify="right", no_wrap=True)
+        table.add_column("Floor", justify="right", style="dim", no_wrap=True)
+        table.add_column("Ceil", justify="right", style="dim", no_wrap=True)
+        table.add_column("Shape", no_wrap=True, style="dim")
+        for row in rows:
+            gone = row["probability_gone"]
+            gone_text = (
+                "[dim]?[/dim]" if gone is None
+                else (f"[red]{gone * 100:.0f}%[/red]" if gone >= 0.7
+                      else (f"[yellow]{gone * 100:.0f}%[/yellow]" if gone >= 0.4
+                            else f"[green]{gone * 100:.0f}%[/green]"))
+            )
+            table.add_row(
+                str(row["rank"]),
+                f"[bold]{row['name']}[/bold]" if row["rank"] == 1 else row["name"],
+                row["position"], row["team"] or "", str(row["tier"] or ""),
+                f"{row['draft_now']}", _num(row["projection"], 0), _num(row["vbd"], 0),
+                _num(row["adp"], 1), gone_text,
+                _num(row["floor"], 0), _num(row["ceiling"], 0), row["outcome"],
+            )
+        console.print(table)
+
+    # ---- 3. MY ROSTER ----------------------------------------------------------------
+    roster = analysis.my_roster()
+    console.print()
+    console.rule("[bold]3 · MY ROSTER[/bold]", style="cyan")
+    lineup = Table(show_header=False, box=None)
+    lineup.add_column(style="cyan", no_wrap=True, width=9)
+    lineup.add_column()
+    for slot in roster["starters"]:
+        lineup.add_row(
+            slot["slot"],
+            f"{slot['name']}  [dim]{slot['team'] or ''}[/dim]" if slot["filled"]
+            else "[dim]—[/dim]",
+        )
+    for slot in roster["bench"]:
+        lineup.add_row("[dim]BN[/dim]", f"[dim]{slot['name']}  {slot['position'] or ''}[/dim]")
+    console.print(lineup)
+    if roster["unfilled_starters"]:
+        console.print(
+            f"[dim]{len(roster['unfilled_starters'])} starting slot(s) to fill: "
+            f"{', '.join(roster['unfilled_starters'])}[/dim]"
+        )
+
+    # ---- secondary -------------------------------------------------------------------
+    env = analysis.draft_environment()
+    if env:
+        console.print()
+        table = Table(
+            title="Draft environment", header_style="bold", title_justify="left", box=None
+        )
+        table.add_column("Pos", style="cyan")
+        table.add_column("Demand", justify="right")
+        table.add_column("Run", justify="right")
+        table.add_column("Value falling to us", justify="right")
+        table.add_column("Expected gone before our pick", justify="right")
+        for pos in ("QB", "RB", "WR", "TE"):
+            if pos not in env:
+                continue
+            entry = env[pos]
+            table.add_row(
+                pos, f"{entry['demand']:.0f}", f"{entry['run_intensity']:.0f}",
+                f"{entry['value_created']:.0f}",
+                f"{entry['expected_gone_before_next_pick']:.1f}",
+            )
+        console.print(table)
+
+    if analysis.sync_error:
+        console.print(
+            f"\n[yellow]Live sync did not run[/yellow] [dim]({analysis.sync_error})[/dim] — "
+            "using the stored board."
+        )
+    for warning in analysis.recommendation.warnings:
         console.print(f"[yellow]note:[/yellow] [dim]{warning}[/dim]")
 
 
@@ -1455,6 +1579,123 @@ def simulate_cmd(
         losses.add_row(position, f"{count:.1f}")
     console.print(losses)
     console.print(f"[dim]{sim.approximation_note}[/dim]")
+
+
+@app.command("serve")
+def serve_cmd(
+    ctx: typer.Context,
+    host: Annotated[str, typer.Option("--host", help="Bind address.")] = "127.0.0.1",
+    port: Annotated[int, typer.Option("--port", "-p", help="Port.")] = 8000,
+    reload: Annotated[bool, typer.Option("--reload", help="Auto-reload on code changes.")] = False,
+) -> None:
+    """Start the local draft dashboard.
+
+    Binds to localhost by default — your league data never leaves the machine.
+    """
+    try:
+        from .api.service import run
+    except ImportError as exc:
+        err_console.print(
+            "[red]Web dependencies are not installed.[/red]\n"
+            "Run: [bold]uv pip install -e \".[web]\"[/bold]"
+        )
+        raise typer.Exit(code=1) from exc
+
+    cfg = get_config(ctx)
+    with connect(cfg.paths.db_path) as db:
+        ready = db.row_count("projections") > 0
+    if not ready:
+        console.print("[yellow]No projections yet — run [bold]ff data refresh[/bold] first.[/yellow]")
+
+    console.print(
+        Panel(
+            Text.assemble(
+                ("Fantasy Draft AI\n", "bold"),
+                (f"http://{host}:{port}\n", "bold cyan"),
+                (f"API docs: http://{host}:{port}/api/docs\n\n", "dim"),
+                ("Press ", "dim"), ("C", "bold"), (" on the page, or click ", "dim"),
+                ("I'M ON THE CLOCK", "bold"), (", to analyse the current pick.\n", "dim"),
+                ("Ctrl-C here to stop.", "dim"),
+            ),
+            border_style="cyan",
+        )
+    )
+    run(host=host, port=port, reload=reload)
+
+
+@app.command("compare-picks")
+def compare_picks_cmd(
+    ctx: typer.Context,
+    names: Annotated[list[str], typer.Argument(help="Two or more player names.")],
+    draft_id: Annotated[str | None, typer.Option("--draft-id")] = None,
+) -> None:
+    """"What if I take A instead of B?" — priced across both picks."""
+    from . import queries
+    from .service import ServiceError, analyze_current_pick, compare_picks
+
+    cfg = get_config(ctx)
+    if len(names) < 2:
+        err_console.print("[red]Give at least two players.[/red]")
+        raise typer.Exit(code=2)
+
+    with connect(cfg.paths.db_path) as db:
+        try:
+            with console.status("[cyan]Analysing both paths...", spinner="dots"):
+                analysis = analyze_current_pick(cfg, db, draft_id=draft_id, refresh=False)
+        except ServiceError as exc:
+            err_console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=1) from exc
+
+        keys: list[str] = []
+        for name in names:
+            match = queries.resolve_one(db, name)
+            if match is None:
+                err_console.print(f"[red]Could not resolve[/red] {name!r} to one player.")
+                raise typer.Exit(code=1)
+            keys.append(match["player_key"])
+
+        result = compare_picks(analysis, keys)
+
+    if not result["paths"]:
+        err_console.print("[yellow]None of those players are on the available board.[/yellow]")
+        raise typer.Exit(code=1)
+
+    table = Table(
+        title=f"Two-pick comparison at {analysis.recommendation.pick_label}",
+        header_style="bold", title_justify="left",
+    )
+    table.add_column("Path", style="cyan")
+    table.add_column("Draft Now", justify="right")
+    table.add_column("Gone by next", justify="right")
+    table.add_column("Value now", justify="right")
+    table.add_column("Expected next", justify="right")
+    table.add_column("Combined", justify="right")
+    table.add_column("Likely next", justify="center")
+    for path in sorted(result["paths"], key=lambda p: -(p["combined"] or 0)):
+        winner = path["player_key"] == result["winner"]
+        table.add_row(
+            f"[bold]{path['name']}[/bold]" if winner else path["name"],
+            _num(path["draft_now"]),
+            f"{path['probability_gone'] * 100:.0f}%" if path["probability_gone"] is not None else "-",
+            _num(path["value_now"]),
+            _num(path["expected_next_value"]),
+            f"[bold]{_num(path['combined'])}[/bold]" if winner else _num(path["combined"]),
+            path["likely_next_position"] or "",
+        )
+    console.print(table)
+
+    if result["winner_name"]:
+        margin = result["margin"]
+        verdict = f"Take [bold]{result['winner_name']}[/bold]"
+        if margin is not None:
+            verdict += (
+                f" — +{margin:.1f} expected value across both picks."
+                if margin >= 1.5
+                else f" — but only +{margin:.1f} across both picks, which is inside "
+                     "simulation noise. Treat these as equivalent."
+            )
+        console.print(Panel(verdict, border_style="green"))
+    console.print(f"[dim]{result['note']}[/dim]")
 
 
 # --- players -------------------------------------------------------------------------

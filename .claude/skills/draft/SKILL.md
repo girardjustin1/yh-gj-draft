@@ -1,93 +1,105 @@
 ---
 name: draft
-description: Give a live NFL fantasy draft recommendation for the pick on the clock. Use when the user says "I'm on the clock", "who should I draft", "/draft", asks who to take at a pick, or asks to compare draft candidates. Runs the local deterministic engine and interprets its output.
+description: Give a live NFL fantasy snake-draft recommendation for the pick on the clock. Use when the user says "I'm on the clock", "who should I draft", "/draft", asks who to take at a pick, or asks to compare two draft candidates. Runs the local deterministic engine and interprets its output.
 ---
 
 # Fantasy draft recommendation
 
-The user is drafting. Your job is to run the local engine, then **interpret and
-communicate** its output.
+The user is drafting and may have 30–90 seconds. Run the engine, then **interpret and
+communicate** its output. Lead with the pick.
 
 ## The one rule
 
 **Python computes; you explain.**
 
 Never invent a projection, score, survival probability, or expected value. Every number
-you state must come from the engine's output. If the engine did not produce a number,
-say that it did not, and lower your stated confidence — do not estimate it yourself. If
-you disagree with a recommendation, say why *in terms of the engine's own components*
-(for example, "the risk component is only 36% confident here because he has one season
-of data"), not from general football opinion.
+you state must come from the engine. If the engine did not produce one, say so and lower
+your stated confidence — do not estimate it. If you disagree with a recommendation, argue
+in terms of the engine's own components ("the risk component is only 36% confident here
+— he has one season of data"), never from general football opinion.
 
 ## Procedure
 
-Run these from the project root. The `ff` command is at `.venv/bin/ff`.
+Run from the project root; `ff` is at `.venv/bin/ff`.
 
-1. **Sync the live board first.** Stale board data is the single biggest source of a
-   wrong recommendation.
-   ```
-   .venv/bin/ff draft sync
-   ```
-   If this fails, continue — the engine falls back to the last synced state and labels
-   it stale. Report that staleness to the user.
+```
+.venv/bin/ff on-clock --json
+```
 
-2. **Get the recommendation as JSON.**
-   ```
-   .venv/bin/ff on-clock --json
-   ```
-   If the user wants the full formatted table, run `.venv/bin/ff on-clock` instead and
-   let its output stand; do not re-render it yourself.
+That single command runs `analyze_current_pick()`, which is **the same function the web
+dashboard calls**. It syncs the live draft, rebuilds `DraftState`, recomputes the
+available pool, scores it, estimates survival, simulates, prices both picks, and ranks —
+all in one call, typically under a second. Do not stitch this together from other
+commands; if the GUI and you compute answers by different routes you will eventually
+disagree mid-draft.
 
-3. **Read the JSON.** It contains: `pick`, `next_pick`, `picks_until_next`, `strategy`,
-   `confidence`, `position_demand`, `simulation`, `recommendation`, `alternatives`,
-   `board`, `warnings`, and a written `explanation`.
+Add `--no-sync` if the user says the board is already current, and `--no-simulate` only
+if speed is critical.
 
-4. **For a close call, look deeper.**
-   ```
-   .venv/bin/ff explain "Player Name"      # every component and how it was derived
-   .venv/bin/ff compare "Player A" "Player B"
-   .venv/bin/ff simulate                    # survival and two-pick EV in detail
-   ```
+## Reading the JSON
+
+Five areas, mirroring the dashboard:
+
+- **`on_the_clock`** — `pick_label`, `next_pick_label`, `picks_until_next`,
+  `recommendation`, `alternatives`, `confidence`, `reason`, `strategy`
+- **`best_available`** — the pool, with `floor` / `median` / `ceiling` and `outcome`
+  (safe / balanced / upside / floor play / volatile / boom or bust)
+- **`my_roster`** — starting slots with holes visible, plus `unfilled_starters`
+- **`who_makes_it_back`** — `probability_available` per player at our next pick
+- **`what_if`** — `value_now` + `expected_next_value` = `combined` per candidate
+
+Plus `draft_environment`, `simulation`, `staleness`, `warnings`, `sync_error`.
+
+## Digging in
+
+```
+.venv/bin/ff compare-picks "Player A" "Player B"   # both picks priced head to head
+.venv/bin/ff explain "Player Name"                 # every component and its derivation
+.venv/bin/ff simulate                              # survival + two-pick EV in detail
+```
 
 ## What to tell the user
 
-Lead with the pick. They are on a clock.
-
-1. **One primary recommendation**, named.
-2. **The single fact that drove it** — usually the survival probability or the
-   two-pick expected value.
+1. **One primary recommendation**, named, first.
+2. **The single fact that drove it** — usually `probability_gone` or the two-pick value.
 3. **Two alternatives**, with the reason each lost.
 4. **Confidence**, as the engine reported it.
-5. **Any stale data or warnings**, explicitly.
+5. **Stale data or warnings**, explicitly.
 
-Keep it short enough to read in fifteen seconds. Detail is available on request.
+Fifteen seconds to read. Offer detail rather than front-loading it.
 
-## What matters in the output
+Shape to aim for:
 
-- `probability_gone` is the number that most often separates the right pick from the
-  highest-ranked one. A player 90% gone and a player 20% gone are different decisions
-  even at identical scores.
-- `two_pick_ev` prices *both* picks — this player plus the simulated best available at
-  the next turn. When it disagrees with the Draft Now ordering, the engine says so in
-  `explanation`; pass that reasoning on.
-- `confidence` below about 45% means the top candidates are genuinely bunched. Say so
-  rather than projecting false certainty; offer the alternatives as real options.
-- `warnings` are not boilerplate. Kickers and defences are not modelled; schedule
-  strength is deliberately low-confidence. Surface anything that bears on this pick.
+> **TAKE KYREN WILLIAMS.** Draft Now 74.2, confidence 50%.
+> He is 57% likely to be gone before your next pick at 5.07, 12 picks away; Joe Burrow
+> has a 64% chance of surviving it, so taking Kyren now is the only way to have both.
+> Across both picks: Kyren 178.4 vs Burrow 176.9.
+> Alternatives: Javonte Williams (72.6), Joe Burrow (72.2).
 
-## Never do
+## What matters most
 
-- Do not recommend from generic positional strategy ("take a RB early") when live board
-  information exists. The engine already knows the room.
-- Do not restate the engine's numbers with different values.
-- Do not run `ff data refresh` mid-draft; it is slow and the draft board is synced
-  separately.
+- **`probability_gone`** is what separates the right pick from the highest-ranked one. A
+  player 90% gone and one 20% gone are different decisions at identical scores.
+- **`what_if` / `two_pick_expected_value`** prices *both* picks. When it disagrees with
+  the Draft Now ordering the engine says so in `reason` — pass that reasoning on.
+- **`confidence` below ~45%** means the candidates are genuinely bunched. Say so; offer
+  the alternatives as real options rather than projecting false certainty.
+- **`warnings`** are not boilerplate. Kickers and defences are unmodelled; schedule
+  strength is deliberately low-confidence. Surface anything bearing on this pick.
+- **`sync_error`** means the board may have moved. Say it plainly.
 
-## If the engine cannot answer
+## Never
 
-| Symptom | Fix |
+- Recommend from generic positional strategy ("take a RB early") when live board data
+  exists — the engine already knows the room.
+- Restate engine numbers with different values.
+- Run `ff data refresh` mid-draft; it is slow, and the draft board syncs separately.
+
+## If it cannot answer
+
+| Message | Fix |
 |---|---|
-| "No draft available" | `ff draft sync`, or `ff draft mock` to practise |
-| "Your draft slot is unknown" | `ff draft sync` once the order is set, or set `draft.slot` in `config/league.yaml` |
-| "No rankings ingested" | `ff data refresh` (do this before draft day, not during) |
-| Sleeper unreachable | The last synced board is used and labelled stale — say so |
+| `NoDraftError` | `ff draft sync` (Sleeper), `ff draft start` (manual entry), or `ff draft mock` to practise |
+| `UnknownSlotError` | `ff draft sync` once the order is set, or set `draft.slot` in `config/league.yaml` |
+| "No rankings ingested" | `ff data refresh` — before draft day, not during |
+| Yahoo not implemented | Yahoo needs approved OAuth credentials; use `ff draft start` + `ff draft pick` to enter picks by hand |

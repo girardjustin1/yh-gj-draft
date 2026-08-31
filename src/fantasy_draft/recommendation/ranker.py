@@ -163,10 +163,17 @@ def recommend(
     warnings.extend(board.warnings)
     frame = board.frame
     if frame.is_empty():
+        # No players to score, but the snake maths is a fact about the draft rather than
+        # about the player pool, so it is still reported. The interface should be able to
+        # tell you where you are even when it cannot tell you who to take.
         return RecommendationResult(
             Recommendation(
-                pick_label=state.pick_label, overall_pick=target_pick,
-                confidence=0.0, warnings=warnings or ["No players available to score."],
+                pick_label=state.board.label(target_pick),
+                overall_pick=target_pick,
+                next_pick_overall=state.my_next_pick,
+                picks_until_next=state.picks_until_next,
+                confidence=0.0,
+                warnings=warnings or ["No players available to score."],
             ),
             board, DraftRoomRead(), StrategyState(),
             SurvivalResult({}, {}, 0, "none"), frame,

@@ -28,7 +28,8 @@ from ..scoring.value_score import add_value_score
 from .market import adp_table, market_signals
 from .offense import team_offense_scores
 from .opportunity import opportunity_score
-from .projections import consensus_projections
+from .outcomes import add_outcome_range
+from .projections import consensus_projections, positional_value_curve
 from .replacement import (
     ReplacementLevel,  # noqa: F401  (re-exported for Board)
     replacement_levels,
@@ -279,6 +280,14 @@ def build_board(
     )
     if "projection_confidence" not in board.columns:
         board = board.with_columns(pl.lit(0.85).alias("projection_confidence"))
+
+    # --- floor / median / ceiling ---
+    # Placed after risk, because the range is skewed by injury and age risk, and before
+    # composition so the scores can see it.
+    outcome_curve = _try(warnings, "Outcome range", lambda: positional_value_curve(db, cfg))
+    board = add_outcome_range(
+        cfg, board, outcome_curve if outcome_curve is not None else pl.DataFrame()
+    )
 
     # --- compose ---
     board = add_player_score(cfg, board)

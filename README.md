@@ -14,10 +14,13 @@ Deterministic Python does the math. Claude explains it.
 
 ```bash
 uv venv --python 3.12
-uv pip install -e ".[dev]"
+uv pip install -e ".[dev,web]"
 source .venv/bin/activate
 
-ff doctor          # validate environment + data
+ff doctor            # validate environment + data
+ff data refresh      # ~290k rows in ~8s. Do this before draft day, not during.
+ff draft mock        # a practice draft over the real board
+ff serve             # dashboard at http://127.0.0.1:8000
 ```
 
 See [ROADMAP.md](ROADMAP.md) for build phases and [HUMAN_TODO.md](HUMAN_TODO.md) for
@@ -82,11 +85,29 @@ Recommendation confidence: 43%.
 |---|---|
 | `ff sleeper connect USERNAME` / `leagues` / `use-league ID` / `status` | Link Sleeper (public read-only) |
 | `ff draft sync` / `status [--rosters]` | Sync and inspect the live board |
+| `ff draft start` / `pick NAME` / `undo` | Enter a draft by hand (any platform) |
 | `ff draft mock [--picks N --slot N]` | Practice draft over the real board |
-| **`ff on-clock [--sync] [--json]`** | **The recommendation** |
+| **`ff on-clock [--sync] [--json]`** | **The recommendation, in five areas** |
+| `ff compare-picks A B` | "What if I take A instead of B?" |
 | `ff simulate [--iterations N]` | Survival + two-pick EV in detail |
+| `ff serve [--port N]` | The local dashboard |
 
 Add `--verbose` or `--debug` to any command for structured logs.
+
+## The dashboard
+
+`ff serve` opens a local page at **http://127.0.0.1:8000** with one primary action —
+**I'M ON THE CLOCK** (or press `C`) — and five areas:
+
+1. **On the clock** — the pick, the next pick, the recommendation, and why
+2. **Best available** — the pool, filterable by position and sortable by any column
+3. **My roster** — actual starting slots, with the holes visible
+4. **Who makes it back to me?** — survival probability at your next pick
+5. **What if I take…** — each candidate priced across *both* picks
+
+One button press calls `analyze_current_pick()` once; the page only renders. No build
+step, no framework, no external requests — it binds to localhost and nothing leaves the
+machine.
 
 ## With Claude
 
@@ -94,8 +115,10 @@ A project skill lives at `.claude/skills/draft/SKILL.md`. In Claude Code, say:
 
 > I'm on the clock.
 
-Claude syncs the draft, runs `ff on-clock --json`, and interprets the result. It is
-instructed never to invent a number the engine can compute.
+Claude runs `ff on-clock --json` — **the same `analyze_current_pick()` the dashboard
+calls** — and interprets the result. It is instructed never to invent a number the engine
+can compute. The GUI, the CLI and Claude cannot disagree, because there is only one
+code path.
 
 ## How it decides
 
@@ -107,6 +130,21 @@ Three scores, not one opaque number — all weights in `config/scoring_weights.y
   scarcity, projection-vs-market
 - **Draft Now Score** — what do I take *at this pick*? the two above plus next-pick
   urgency, tier scarcity, roster fit, draft-room behaviour, strategy fit
+
+Plus, for every player, a **floor / median / ceiling** range and a shape label (safe,
+upside, floor play, boom or bust), so a 210-point certainty is distinguishable from a
+120-or-300 coin flip.
+
+## Draft platforms
+
+| Platform | Status | What it needs |
+|---|---|---|
+| **Sleeper** | ✅ working | Your **public username** only — no password, no token |
+| **Manual entry** | ✅ working | Nothing. `ff draft start` then `ff draft pick "Name"` |
+| **Yahoo** | ⚠️ stub | An approved Yahoo developer application (manual review, read-only). Raises with instructions rather than failing confusingly. |
+
+All three normalize into the same `DraftState`; the recommendation engine never learns
+which one supplied it.
 
 Every component reports a **confidence**. When one cannot be computed, its weight is
 redistributed across the components we do have — never scored as a confident-looking

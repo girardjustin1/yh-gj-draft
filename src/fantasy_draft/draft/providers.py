@@ -4,9 +4,10 @@ Everything downstream consumes :class:`~fantasy_draft.draft.state.DraftState`. A
 platform means one new class here and nothing else — no scoring code knows what a
 Sleeper ID looks like.
 
-Sleeper is the reference implementation. ESPN and Yahoo are deliberately absent: the
-interface exists so they can be added, and adding them before Sleeper works end to end
-would be building the wrong thing first.
+Sleeper is the reference implementation and the only one that is wired up. Yahoo is
+present as an explicit stub that raises with instructions, rather than as silence: the
+config accepts ``platform: yahoo``, and a user who sets it deserves to be told exactly
+what is missing instead of getting a confusing failure somewhere downstream.
 """
 
 from __future__ import annotations
@@ -42,6 +43,18 @@ class DraftProvider(Protocol):
     def resolve_pick(self, raw: dict[str, Any]) -> DraftPick:
         """Convert one platform pick record into our canonical form."""
         ...
+
+
+class ProviderError(RuntimeError):
+    """Raised with a message the caller should show the user verbatim."""
+
+
+class ProviderNotConfigured(ProviderError):
+    """The chosen platform exists but has not been set up on this machine."""
+
+
+class ProviderNotImplemented(ProviderError):
+    """The chosen platform has no working implementation yet."""
 
 
 class PlayerKeyResolver:
@@ -232,6 +245,75 @@ class SleeperDraftProvider:
         return stored or None
 
 
+class YahooDraftProvider:
+    """Yahoo Fantasy — interface only. Not implemented.
+
+    This exists so that ``platform: yahoo`` in league.yaml produces a precise, actionable
+    error instead of a confusing failure three layers down, and so the shape of the work
+    is recorded where the next person will look for it.
+
+    **What is actually required.** Yahoo's Fantasy Sports API is OAuth 2.0 only: there is
+    no public read path equivalent to Sleeper's. Wiring it up needs, in order:
+
+    1. A registered application at ``developer.yahoo.com``, which yields a client ID and
+       secret. These belong in ``.env`` (already gitignored) and must never be committed.
+    2. A three-legged OAuth consent flow, storing the refresh token locally.
+    3. ``GET /fantasy/v2/users;use_login=1/games;game_keys=nfl/leagues`` to list leagues,
+       then ``.../league/<key>/settings`` for scoring and roster slots, and
+       ``.../league/<key>/draftresults`` for the picks.
+    4. A ``resolve_pick`` that maps Yahoo's player keys onto our ``player_key`` via the
+       ``yahoo_id`` column already present in ``player_ids`` from the ffverse map.
+
+    Steps 3 and 4 are straightforward; step 1 needs credentials only the league owner can
+    create, which is why this is a stub rather than an untested implementation. See
+    HUMAN_TODO.md.
+    """
+
+    platform = "yahoo"
+
+    #: What a caller should tell the user.
+    MESSAGE = (
+        "Yahoo is not implemented. Yahoo's Fantasy API requires OAuth 2.0 with a "
+        "registered application — there is no public read path like Sleeper's — so it "
+        "needs credentials only you can create. See HUMAN_TODO.md for the steps, or set "
+        "`platform: sleeper` in config/league.yaml, which is fully working."
+    )
+
+    def __init__(self, cfg: AppConfig, db: Database) -> None:
+        self.cfg = cfg
+        self.db = db
+
+    def fetch_state(self, draft_id: str) -> DraftState:
+        raise ProviderNotImplemented(self.MESSAGE)
+
+    def resolve_pick(self, raw: dict[str, Any]) -> DraftPick:
+        raise ProviderNotImplemented(self.MESSAGE)
+
+
+class ManualDraftProvider:
+    """No live platform. The stored draft state is whatever was last loaded or mocked."""
+
+    platform = "manual"
+
+    def __init__(self, cfg: AppConfig, db: Database) -> None:
+        self.cfg = cfg
+        self.db = db
+
+    def fetch_state(self, draft_id: str) -> DraftState:
+        from .store import load_state
+
+        state = load_state(self.db, draft_id)
+        if state is None:
+            raise ProviderNotConfigured(
+                "No stored draft. Run `ff draft mock` to practise, or set "
+                "`platform: sleeper` and run `ff draft sync` for a live draft."
+            )
+        return state
+
+    def resolve_pick(self, raw: dict[str, Any]) -> DraftPick:
+        return DraftPick(**raw)
+
+
 class FixtureDraftProvider:
     """Replays a saved draft. Lets every test and simulation run without a network."""
 
@@ -245,3 +327,53 @@ class FixtureDraftProvider:
 
     def resolve_pick(self, raw: dict[str, Any]) -> DraftPick:
         return DraftPick(**raw)
+
+
+#: Platform name -> provider class. The recommendation engine never consults this; it
+#: only ever sees a DraftState.
+PROVIDERS: dict[str, type] = {
+    "sleeper": SleeperDraftProvider,
+    "yahoo": YahooDraftProvider,
+    "manual": ManualDraftProvider,
+}
+
+
+def provider_for(cfg: AppConfig, db: Database) -> Any:
+    """Build the provider for the configured platform."""
+    platform = cfg.league.platform
+    provider_class = PROVIDERS.get(platform)
+    if provider_class is None:
+        raise ProviderNotImplemented(
+            f"Platform {platform!r} has no provider. Available: "
+            f"{', '.join(sorted(PROVIDERS))}."
+        )
+    return provider_class(cfg, db)
+
+
+def provider_status(cfg: AppConfig, db: Database) -> dict[str, Any]:
+    """What the interface should show about the active data source."""
+    platform = cfg.league.platform
+    connected = False
+    detail = ""
+
+    if platform == "sleeper":
+        user = db.get_meta("sleeper_username")
+        league = db.get_meta("sleeper_league_id")
+        connected = bool(user and league)
+        detail = (
+            f"connected as {user}, league {league}" if connected
+            else "run `ff sleeper connect <username>` then `ff sleeper use-league <id>`"
+        )
+    elif platform == "yahoo":
+        detail = YahooDraftProvider.MESSAGE
+    elif platform == "manual":
+        connected = True
+        detail = "using the locally stored draft (mock or last sync)"
+
+    return {
+        "platform": platform,
+        "connected": connected,
+        "implemented": platform in {"sleeper", "manual"},
+        "detail": detail,
+        "available": sorted(PROVIDERS),
+    }

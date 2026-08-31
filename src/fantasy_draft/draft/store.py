@@ -86,6 +86,81 @@ def save_state(db: Database, state: DraftState, settings: dict[str, Any] | None 
         db.upsert_table("draft_rosters", rosters, keys=["draft_id"])
 
 
+def record_pick(
+    db: Database,
+    state: DraftState,
+    player_key: str,
+    player_name: str | None = None,
+    position: str | None = None,
+    nfl_team: str | None = None,
+) -> DraftState:
+    """Append one selection to a stored draft by hand.
+
+    The fallback for any platform we cannot read live — Yahoo today, a league drafting in
+    a room, or an API outage mid-draft. The engine cannot tell the difference: a manually
+    entered pick produces exactly the same ``DraftState`` a synced one does.
+    """
+    overall = state.picks_made + 1
+    if overall > state.board.total_picks:
+        raise ValueError(
+            f"The draft is complete ({state.board.total_picks} picks). Nothing to record."
+        )
+    if player_key in state.drafted_keys:
+        raise ValueError(f"{player_name or player_key} has already been drafted.")
+
+    slot = state.board.slot_for(overall)
+    pick = DraftPick(
+        overall=overall,
+        round=state.board.round_for(overall),
+        slot=slot,
+        team_id=state.slot_to_team.get(slot, f"slot-{slot:02d}"),
+        player_key=player_key,
+        player_name=player_name,
+        position=position,
+        nfl_team=nfl_team,
+        picked_at=datetime.now(),
+    )
+    state.picks.append(pick)
+    state.synced_at = datetime.now()
+    save_state(db, state)
+    return state
+
+
+def undo_pick(db: Database, state: DraftState) -> DraftPick | None:
+    """Remove the most recent selection. Returns it, or None if the draft was empty."""
+    if not state.picks:
+        return None
+    removed = state.picks.pop()
+    state.synced_at = datetime.now()
+    with db.transaction() as conn:
+        conn.execute(
+            "DELETE FROM draft_picks WHERE draft_id = ? AND overall = ?",
+            [state.draft_id, removed.overall],
+        )
+    save_state(db, state)
+    return removed
+
+
+def create_manual_draft(
+    db: Database, league: Any, draft_id: str = "manual-draft"
+) -> DraftState:
+    """Start an empty draft we will fill in by hand."""
+    state = DraftState(
+        draft_id=draft_id,
+        platform="manual",
+        season=league.season,
+        board=SnakeBoard.from_league(league),
+        picks=[],
+        slot_to_team={s: f"slot-{s:02d}" for s in range(1, league.teams + 1)},
+        my_slot=league.draft.slot,
+        my_team_id=f"slot-{league.draft.slot:02d}" if league.draft.slot else None,
+        status="drafting",
+        synced_at=datetime.now(),
+    )
+    save_state(db, state)
+    return state
+
+
 def load_state(db: Database, draft_id: str | None = None) -> DraftState | None:
     """Load the most recently synced draft, or a specific one."""
     if draft_id:

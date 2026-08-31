@@ -30,10 +30,15 @@
                  RECOMMENDATION        src/fantasy_draft/recommendation/*
                         │              ranked candidates + explanation + confidence
                         ▼
-                   CLI  /  MCP         src/fantasy_draft/cli.py, mcp/server.py
+             analyze_current_pick()    src/fantasy_draft/service.py
+                        │              THE single orchestration entry point
+            ┌───────────┼───────────┐
+            ▼           ▼           ▼
+          CLI      JSON API      CLAUDE
+       (cli.py)  (api/service)   (skill)
                         │
                         ▼
-                     CLAUDE            interprets and communicates; computes nothing
+                  DASHBOARD            api/static/index.html — renders only
 ```
 
 ## Module responsibilities
@@ -46,7 +51,9 @@
 | `draft/` | Pick arithmetic, board state, opponent modelling, simulation | Rank players by quality |
 | `scoring/` | Combining components into 0–100 composites using YAML weights | Hard-code a weight |
 | `recommendation/` | Ordering candidates and writing the explanation | Recompute analytics |
+| `service.py` | Orchestrating a pick end to end | Contain football maths |
 | `cli.py` | Human interface | Contain business logic worth testing |
+| `api/` | HTTP transport and rendering | Compute *anything* |
 
 The dependency direction is strictly downward. `analytics/` importing from `data/` is a
 bug; ingestion writes to DuckDB and analytics reads from it.
@@ -72,6 +79,17 @@ and duration, so staleness is a queryable fact rather than a guess.
 Normalization strips suffixes, punctuation, and case, and applies a small explicit
 nickname table. **Ambiguous matches are never merged** — they land in
 `unresolved_players` and surface via `ff data unresolved-players`.
+
+## One entry point, three consumers
+
+`analyze_current_pick()` in `service.py` is the only route to a recommendation. The CLI,
+the JSON API and the Claude skill all call it and differ solely in how they render the
+result.
+
+This is deliberate rather than tidy. If the dashboard and the assistant computed answers
+by different routes they would eventually disagree mid-draft, and two confident,
+conflicting recommendations on a 90-second clock are worse than one imperfect answer.
+The page contains no scoring logic at all — it reads keys off a JSON payload.
 
 ## Failure isolation
 
