@@ -132,18 +132,70 @@ def assign_tiers(cfg: AppConfig, frame: pl.DataFrame) -> pl.DataFrame:
         (pl.col("projected_points") - pl.col("next_tier_best")).alias("points_to_next_tier")
     )
 
-    # Cliff score: how costly is it to wait? Scaled against the position's own spread, so
-    # a 20-point TE cliff and a 20-point WR cliff are not treated as equally severe.
-    spread = (
-        tiered.group_by("position")
-        .agg(pl.col("projected_points").std().alias("pos_sd"))
+    return tiered.drop("next_tier_best").sort(
+        "vbd" if "vbd" in tiered.columns else "projected_points",
+        descending=True, nulls_last=True,
     )
-    tiered = tiered.join(spread, on="position", how="left").with_columns(
-        (
-            100.0
-            * (pl.col("points_to_next_tier").fill_null(0.0) / (pl.col("pos_sd") + 1e-9))
-        ).clip(0, 100).alias("tier_cliff_score")
-    ).drop("pos_sd", "next_tier_best")
 
-    return tiered.sort("vbd" if "vbd" in tiered.columns else "projected_points",
-                       descending=True, nulls_last=True)
+
+def expected_loss_by_waiting(
+    board: pl.DataFrame, slides: dict[str, float], default_slide: float = 3.0
+) -> pl.DataFrame:
+    """What does waiting until our next pick actually cost, in projected points?
+
+    This is the honest form of "tier cliff". Tier membership alone is not the right
+    signal: a cliff sits at the *bottom* edge of a tier, but every player in the tier
+    inherits it. Mid-draft that gave the first of fourteen available tier-3 quarterbacks
+    a maximum cliff score when the next quarterback was ten points away and thirteen more
+    sat between him and the drop.
+
+    So instead of asking "how far is the drop behind my tier", we ask the question that
+    actually bears on the decision: **if I skip him, who do I get instead?** Slide down
+    his position's available list by the number of players at that position expected to
+    go before our next turn, and take the difference. Tier cliffs fall out of this
+    naturally — if the next few players really are far worse, the loss is large — and it
+    is directly comparable across positions because it is measured in points.
+
+    ``slides`` maps position to the expected number taken before our next pick; positions
+    absent from it use ``default_slide``.
+
+    Adds ``expected_loss_points`` and a normalized ``tier_cliff_score``.
+    """
+    if board.is_empty():
+        return board.with_columns(
+            pl.lit(0.0).alias("expected_loss_points"),
+            pl.lit(50.0).alias("tier_cliff_score"),
+        )
+
+    losses: dict[str, float] = {}
+    for (position,), group in board.group_by(["position"], maintain_order=True):
+        ordered = group.sort("projected_points", descending=True, nulls_last=True)
+        points = ordered["projected_points"].fill_null(0.0).to_list()
+        keys = ordered["player_key"].to_list()
+        n = len(points)
+        slide = max(1, int(round(slides.get(str(position), default_slide))))
+        for index, key in enumerate(keys):
+            fallback = points[min(index + slide, n - 1)]
+            losses[key] = max(0.0, points[index] - fallback)
+
+    frame = board.with_columns(
+        pl.col("player_key")
+        .replace_strict(losses, default=0.0)
+        .cast(pl.Float64)
+        .alias("expected_loss_points")
+    )
+    # Waiting can never cost more than a player's edge over a freely available
+    # replacement -- that is the floor of what we end up with either way.
+    if "vbd" in frame.columns:
+        frame = frame.with_columns(
+            pl.min_horizontal(
+                pl.col("expected_loss_points"), pl.col("vbd").fill_null(0.0).clip(0, None)
+            ).alias("expected_loss_points")
+        )
+
+    ceiling = float(frame["expected_loss_points"].max() or 0.0)
+    return frame.with_columns(
+        (100.0 * pl.col("expected_loss_points") / (ceiling + 1e-9))
+        .clip(0, 100)
+        .alias("tier_cliff_score")
+    )

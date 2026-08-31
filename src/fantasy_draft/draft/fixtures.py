@@ -11,11 +11,15 @@ from __future__ import annotations
 
 import random
 from datetime import datetime, timedelta
+from typing import TYPE_CHECKING
 
 from ..config import LeagueConfig
 from ..models import DraftPick
 from .snake import SnakeBoard
 from .state import DraftState
+
+if TYPE_CHECKING:
+    import polars as pl
 
 #: A small, realistic 2026-shaped player pool. Names are real; the ordering approximates
 #: an August consensus board. Points are indicative, not projections.
@@ -156,6 +160,94 @@ def build_fixture_draft(
         my_team_id=slot_to_team[slot],
         status="drafting",
         synced_at=datetime(2026, 8, 30, 19, 30, 0),
+    )
+
+
+def build_mock_draft(
+    board: pl.DataFrame,
+    picks_made: int = 40,
+    slot: int = 7,
+    teams: int = 12,
+    rounds: int = 15,
+    seed: int = 20260831,
+    need_weight: float = 0.55,
+) -> DraftState:
+    """Generate a mock draft over the *real* scored board.
+
+    Same simulated managers as :func:`build_fixture_draft`, but drafting actual players
+    with real ``player_key`` values, so ``ff on-clock`` can be exercised end to end
+    before draft day. ``board`` needs ``player_key``, ``player_name``, ``position``,
+    ``team`` and ``adp``.
+    """
+    import polars as pl_
+
+    rng = random.Random(seed)
+    snake = SnakeBoard(teams=teams, rounds=rounds)
+
+    ordered = (
+        board.filter(pl_.col("adp").is_not_null())
+        .sort("adp")
+        .select("player_key", "player_name", "position", "team")
+        .to_dicts()
+    )
+    if not ordered:
+        ordered = board.select("player_key", "player_name", "position", "team").to_dicts()
+
+    available = list(range(len(ordered)))
+    slot_to_team = {s: f"team-{s:02d}" for s in range(1, teams + 1)}
+    rosters: dict[int, dict[str, int]] = {s: {} for s in range(1, teams + 1)}
+    picks: list[DraftPick] = []
+    start = datetime(2026, 8, 30, 19, 0, 0)
+
+    total = min(picks_made, snake.total_picks, len(ordered))
+    for overall in range(1, total + 1):
+        picking_slot = snake.slot_for(overall)
+        roster = rosters[picking_slot]
+        window = available[: min(10, len(available))]
+
+        choice = window[0]
+        if rng.random() < need_weight:
+            needed = [
+                index
+                for index in window
+                if roster.get(ordered[index]["position"], 0)
+                < TARGET_ROSTER.get(ordered[index]["position"], 0)
+            ]
+            if needed:
+                choice = needed[0] if rng.random() < 0.7 else rng.choice(needed)
+        elif len(window) > 1 and rng.random() < 0.3:
+            choice = rng.choice(window[:4])
+
+        entry = ordered[choice]
+        available.remove(choice)
+        roster[entry["position"]] = roster.get(entry["position"], 0) + 1
+
+        picks.append(
+            DraftPick(
+                overall=overall,
+                round=snake.round_for(overall),
+                slot=picking_slot,
+                team_id=slot_to_team[picking_slot],
+                player_key=entry["player_key"],
+                player_name=entry["player_name"],
+                position=entry["position"],
+                nfl_team=entry["team"],
+                picked_at=start + timedelta(seconds=45 * overall),
+            )
+        )
+
+    return DraftState(
+        draft_id="mock-2026",
+        platform="mock",
+        season=2026,
+        board=snake,
+        picks=picks,
+        slot_to_team=slot_to_team,
+        team_names={team_id: f"Manager {s}" for s, team_id in slot_to_team.items()},
+        my_slot=slot,
+        my_team_id=slot_to_team[slot],
+        status="drafting",
+        synced_at=datetime.now(),
     )
 
 

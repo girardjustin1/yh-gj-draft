@@ -1061,6 +1061,243 @@ def draft_status(
         console.print(every)
 
 
+@draft_app.command("mock")
+def draft_mock(
+    ctx: typer.Context,
+    picks: Annotated[int, typer.Option("--picks", help="Picks already made.")] = 40,
+    slot: Annotated[int | None, typer.Option("--slot", help="Your draft slot.")] = None,
+    seed: Annotated[int, typer.Option("--seed", help="Reproducible room behaviour.")] = 20260831,
+) -> None:
+    """Generate a practice draft over the real board, so you can rehearse `ff on-clock`.
+
+    Simulated managers follow the consensus most of the time and reach to fill roster
+    holes the rest, which produces realistic position runs rather than an ADP walk.
+    """
+    from .draft.fixtures import build_mock_draft
+    from .draft.store import save_state
+
+    cfg = get_config(ctx)
+    board = _load_board(cfg, quiet=True)
+    target_slot = slot or cfg.league.draft.slot or 7
+
+    if not 1 <= target_slot <= cfg.league.teams:
+        err_console.print(
+            f"[red]Slot {target_slot} is outside 1-{cfg.league.teams}.[/red]"
+        )
+        raise typer.Exit(code=2)
+
+    state = build_mock_draft(
+        board.frame, picks_made=picks, slot=target_slot,
+        teams=cfg.league.teams, rounds=cfg.league.draft.rounds, seed=seed,
+    )
+    with connect(cfg.paths.db_path) as db:
+        save_state(db, state, settings={"league_id": "mock"})
+
+    console.print(
+        f"{OK} mock draft created — [bold]{state.picks_made}[/bold] picks made, "
+        f"you are slot [bold]{target_slot}[/bold], on the clock at "
+        f"[bold]{state.pick_label}[/bold]"
+    )
+    console.print("Try: [bold]ff on-clock[/bold]  ·  [bold]ff draft status[/bold]")
+
+
+# --- on the clock --------------------------------------------------------------------
+
+
+def _bar(value: float, width: int = 12) -> str:
+    filled = int(round(width * max(0.0, min(100.0, value)) / 100.0))
+    colour = "red" if value >= 75 else ("yellow" if value >= 50 else "green")
+    return f"[{colour}]{'█' * filled}[/{colour}][dim]{'░' * (width - filled)}[/dim]"
+
+
+@app.command("on-clock")
+def on_clock(
+    ctx: typer.Context,
+    draft_id: Annotated[str | None, typer.Option("--draft-id")] = None,
+    limit: Annotated[int, typer.Option("--limit", "-n", help="Candidates to show.")] = 6,
+    sync: Annotated[bool, typer.Option("--sync/--no-sync", help="Refresh from Sleeper first.")] = False,
+    json_out: Annotated[bool, typer.Option("--json", help="Emit compact JSON instead.")] = False,
+) -> None:
+    """The recommendation: who should I draft right now?"""
+    from .data.sleeper import SleeperError, source_freshness
+    from .draft.store import load_state, save_state
+    from .recommendation.ranker import recommend
+
+    cfg = get_config(ctx)
+    with connect(cfg.paths.db_path) as db:
+        if sync:
+            from .draft.providers import SleeperDraftProvider
+
+            try:
+                target = _resolve_draft_id(cfg, db, draft_id)
+                state = SleeperDraftProvider(cfg, db).fetch_state(target)
+                save_state(db, state)
+            except (SleeperError, typer.Exit) as exc:
+                console.print(f"[yellow]Sync failed ({exc}); using the last synced board.[/yellow]")
+                state = load_state(db, draft_id)
+        else:
+            state = load_state(db, draft_id)
+
+        if state is None:
+            err_console.print(
+                "No draft available. Run [bold]ff draft sync[/bold] for a live draft, "
+                "or [bold]ff draft mock[/bold] to practise."
+            )
+            raise typer.Exit(code=1)
+
+        if state.my_slot is None:
+            err_console.print(
+                "[red]Your draft slot is unknown[/red], so snake math cannot run.\n"
+                "Set [bold]draft.slot[/bold] in config/league.yaml or run "
+                "[bold]ff draft sync[/bold] once the order is set."
+            )
+            raise typer.Exit(code=1)
+
+        with console.status("[cyan]Thinking...", spinner="dots"):
+            result = recommend(db, cfg, state, limit=max(limit, 6))
+
+    rec = result.recommendation
+    if json_out:
+        import json
+
+        console.print_json(
+            json.dumps(
+                {
+                    "pick": rec.pick_label,
+                    "overall_pick": rec.overall_pick,
+                    "next_pick": rec.next_pick_overall,
+                    "picks_until_next": rec.picks_until_next,
+                    "strategy": rec.strategy.value,
+                    "strategy_confidence": round(rec.strategy_confidence, 3),
+                    "confidence": round(rec.confidence, 3),
+                    "position_demand": rec.position_demand,
+                    "recommendation": rec.primary.summary() if rec.primary else None,
+                    "alternatives": [c.summary() for c in rec.alternatives],
+                    "board": [c.summary() for c in rec.board],
+                    "warnings": rec.warnings,
+                    "explanation": rec.explanation,
+                }
+            )
+        )
+        return
+
+    stale_sync = (datetime.now() - state.synced_at).total_seconds() > 180
+
+    # --- header ---
+    console.print()
+    console.rule("[bold]ON THE CLOCK[/bold]", style="cyan")
+    header = Table(show_header=False, box=None, padding=(0, 2, 0, 0))
+    header.add_column(style="dim", no_wrap=True)
+    header.add_column()
+    header.add_row("League", f"{cfg.league.name} — {cfg.league.label}")
+    header.add_row("Pick", f"[bold]{rec.pick_label}[/bold] (overall {rec.overall_pick})")
+    if rec.next_pick_overall:
+        header.add_row(
+            "Next pick",
+            f"{state.board.label(rec.next_pick_overall)} "
+            f"(overall {rec.next_pick_overall}) — "
+            f"[bold]{rec.picks_until_next}[/bold] picks away",
+        )
+    else:
+        header.add_row("Next pick", "[dim]this is our last pick[/dim]")
+    header.add_row(
+        "Draft synced",
+        f"[{'yellow' if stale_sync else 'dim'}]{source_freshness(state.synced_at)}"
+        f"{' — run `ff draft sync`' if stale_sync else ''}[/]",
+    )
+    console.print(header)
+
+    # --- our roster ---
+    roster = state.my_roster()
+    if roster and roster.player_keys:
+        lines = []
+        for pick in state.picks:
+            if pick.player_key in roster.player_keys:
+                lines.append(
+                    f"[cyan]{(pick.position or '?'):<4}[/cyan]{pick.player_name or pick.player_key}"
+                )
+        console.print(Panel("\n".join(lines), title="Current roster", border_style="dim"))
+    else:
+        console.print(Panel("[dim]empty[/dim]", title="Current roster", border_style="dim"))
+
+    # --- draft environment ---
+    env = Table(title="Draft environment", header_style="bold", title_justify="left")
+    env.add_column("Pos", style="cyan")
+    env.add_column("Demand", justify="right")
+    env.add_column("", no_wrap=True)
+    env.add_column("Run", justify="right")
+    env.add_column("Value falling to us", justify="right")
+    env.add_column("Expected gone before our pick", justify="right")
+    for position in ("QB", "RB", "WR", "TE"):
+        demand = result.room.demand.get(position, 50.0)
+        env.add_row(
+            position,
+            f"{demand:.0f}",
+            _bar(demand),
+            f"{result.room.run_intensity.get(position, 0):.0f}",
+            f"{result.room.value_created.get(position, 50):.0f}",
+            f"{result.survival.expected_position_losses.get(position, 0):.1f}",
+        )
+    console.print(env)
+
+    console.print(
+        f"Strategy: [bold]{result.strategy.label}[/bold] "
+        f"[dim](confidence {result.strategy.confidence * 100:.0f}% — "
+        f"{result.strategy.reason})[/dim]\n"
+    )
+
+    # --- candidates ---
+    table = Table(title="Top candidates", header_style="bold", title_justify="left")
+    table.add_column("#", justify="right", style="dim", no_wrap=True)
+    table.add_column("Player", no_wrap=True, min_width=18)
+    table.add_column("Pos", justify="center", no_wrap=True)
+    table.add_column("Tier", justify="center", no_wrap=True)
+    table.add_column("Draft Now", justify="right", no_wrap=True)
+    table.add_column("Player", justify="right", no_wrap=True)
+    table.add_column("Value", justify="right", no_wrap=True)
+    table.add_column("ADP", justify="right", no_wrap=True)
+    table.add_column("Gone by next", justify="right", no_wrap=True)
+    for i, candidate in enumerate(rec.board[:limit], start=1):
+        gone = candidate.survival.probability_gone if candidate.survival else None
+        gone_text = "[dim]?[/dim]" if gone is None else (
+            f"[red]{gone * 100:.0f}%[/red]" if gone >= 0.7
+            else (f"[yellow]{gone * 100:.0f}%[/yellow]" if gone >= 0.4
+                  else f"[green]{gone * 100:.0f}%[/green]")
+        )
+        table.add_row(
+            str(i),
+            f"[bold]{candidate.name}[/bold]" if i == 1 else candidate.name,
+            candidate.position,
+            str(candidate.tier or ""),
+            f"[bold]{candidate.draft_now:.1f}[/bold]",
+            f"{candidate.player_score.value:.1f}" if candidate.player_score else "",
+            f"{candidate.value_score.value:.1f}" if candidate.value_score else "",
+            _num(candidate.adp, 1),
+            gone_text,
+        )
+    console.print(table)
+
+    # --- the recommendation ---
+    if rec.primary:
+        console.print()
+        console.rule(f"[bold green]TAKE {rec.primary.name.upper()}[/bold green]", style="green")
+        console.print()
+        console.print(rec.explanation)
+        console.print()
+        if rec.alternatives:
+            console.print(
+                "[dim]Alternatives: "
+                + "  ·  ".join(
+                    f"{c.name} ({c.position}, Draft Now {c.draft_now:.1f})"
+                    for c in rec.alternatives
+                )
+                + "[/dim]"
+            )
+
+    for warning in rec.warnings:
+        console.print(f"[yellow]note:[/yellow] [dim]{warning}[/dim]")
+
+
 # --- players -------------------------------------------------------------------------
 
 

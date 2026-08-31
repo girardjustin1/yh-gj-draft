@@ -29,11 +29,14 @@ from .market import adp_table, market_signals
 from .offense import team_offense_scores
 from .opportunity import opportunity_score
 from .projections import consensus_projections
-from .replacement import ReplacementLevel
+from .replacement import (
+    ReplacementLevel,  # noqa: F401  (re-exported for Board)
+    replacement_levels,
+)
 from .risk import risk_score
 from .scarcity import PositionScarcity, position_scarcity, scarcity_frame
-from .tiers import assign_tiers
-from .vbd import compute_vbd
+from .tiers import assign_tiers, expected_loss_by_waiting
+from .vbd import add_vbd
 
 log = get_logger(__name__)
 
@@ -100,6 +103,7 @@ def build_board(
     drafted: set[str] | None = None,
     current_pick: int | None = None,
     picks_until_next: int | None = None,
+    next_pick: int | None = None,
 ) -> Board:
     """Assemble the scored board.
 
@@ -116,6 +120,19 @@ def build_board(
         return Board(pl.DataFrame(), {}, {}, warnings, current_pick=current_pick)
 
     projections = projections.filter(pl.col("position").is_in(list(MODELLED_POSITIONS)))
+
+    # Replacement level must be derived from the FULL player universe, before removing
+    # drafted players.
+    #
+    # Replacement level answers "how good is a freely available player at this position",
+    # which is a property of the league's structure and the player pool -- not of who
+    # happens to be left right now. Computing it on the shrinking available pool makes
+    # the baseline drift down as the draft proceeds, inflating every remaining player's
+    # VBD, and inflating it *unevenly* by position (mid-draft this was worth +37 points
+    # of phantom VBD to receivers against +7 to tight ends). That corrupts exactly the
+    # cross-positional comparison VBD exists to make.
+    levels = replacement_levels(cfg, projections, positions=MODELLED_POSITIONS)
+
     if drafted:
         projections = projections.filter(~pl.col("player_key").is_in(list(drafted)))
 
@@ -129,13 +146,24 @@ def build_board(
         )
 
     # --- value over replacement, then tiers on top of it ---
-    board, levels = compute_vbd(cfg, projections, positions=MODELLED_POSITIONS)
+    # Tiers, unlike replacement, *are* computed on what is available: mid-draft the
+    # useful question is how far the drop is to the next group of players we could
+    # actually still take.
+    board = add_vbd(projections, levels)
     board = assign_tiers(cfg, board)
+    # A first pass at "what does waiting cost", using a flat expectation. The
+    # recommendation engine recomputes this with the real per-position demand once the
+    # survival model has run.
+    flat_slide = max(1.0, (picks_until_next or 12) / 4.0)
+    board = expected_loss_by_waiting(board, {}, default_slide=flat_slide)
 
     # --- market ---
     adp = _try(warnings, "ADP/consensus rank", lambda: adp_table(db, cfg))
     if adp is not None:
-        board = market_signals(board, adp, current_pick=current_pick)
+        board = market_signals(
+            board, adp, current_pick=current_pick,
+            picks_until_next=picks_until_next, next_pick=next_pick,
+        )
     else:
         board = board.with_columns(
             pl.lit(50.0).alias("market_value_score"),

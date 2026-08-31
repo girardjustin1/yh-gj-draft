@@ -140,14 +140,46 @@ position mix. Round-trips through DuckDB unchanged.
 
 ---
 
-## ⬜ Phase 4 — Draft Now
+## ✅ Phase 4 — Draft Now
 
-- Roster fit, position runs, draft-room behaviour, opponent roster needs
-- Next-pick survival model (interpretable, ADP-distribution based)
-- Draft Now Score, `ff on-clock`
+**Built**
+- `draft/opponent_needs.py` — per-pick positional intent for every manager ahead of our
+  next turn. The market prior is read off the consensus board's own ADP mix rather than
+  hardcoded, then modulated by unfilled starting slots. No personal profiling.
+- `draft/availability.py` — the roster-aware survival model, plus the ADP-only baseline
+  for comparison
+- `analytics/draft_room.py` — demand, run intensity, and **value created at the
+  positions the room is skipping**
+- `analytics/roster_fit.py` · `draft/strategies.py` (Balanced / Hero RB / Robust RB /
+  Zero RB as soft, shifting probabilities)
+- `scoring/draft_now.py` · `recommendation/ranker.py` · `recommendation/explanation.py`
+- `ff on-clock [--sync --json]`, `ff draft mock` (practice over the real board)
 
-**Acceptance** — the tool recommends a *contextual* pick, not the highest-ranked
-available player.
+**Acceptance** ✅ — at 4.06 with 1 RB / 2 WR rostered, it recommends Kyren Williams
+(Player Score 91.5, **53% gone before our next pick**) over safer, higher-ADP-value
+options, and explains the trade in the spec's own terms.
+
+**Four real bugs, all found by looking at output that was obviously wrong**
+1. **Replacement level was computed on the shrinking available pool**, so every VBD
+   inflated as the draft progressed — and inflated *unevenly by position* (+37 phantom
+   points to WR against +7 to TE), corrupting the one comparison VBD exists to make.
+   Replacement is now derived from the full universe and applied to what is left.
+2. **Unknown survival was rewarding players.** The model only covered the top 120 by
+   Player Score; everyone else got a null urgency, whose weight the composition step
+   then redistributed — so a player 90 picks past his ADP carried *no* urgency penalty
+   and topped the board. Every player now gets a probability, falling back to the ADP
+   curve at lower confidence.
+3. **Market value and urgency double-counted with opposite signs**, very nearly
+   cancelling, so the engine recommended players it simultaneously reported an 81%
+   chance of still being available. The discount is now capped at the horizon we can act
+   over and weighted by the probability we would actually lose him: *a discount you can
+   capture at your next pick is not a discount*.
+4. **Every player in a tier inherited the cliff at the tier's bottom edge.** The first of
+   fourteen available tier-3 QBs scored a maximum cliff when the next QB was 10 points
+   away. Replaced with the quantity it was approximating — *if I skip him, who do I
+   actually get instead?* — sliding down his position by the number expected to go
+   before our next turn. Tier cliffs fall out of it naturally and it is comparable
+   across positions because it is measured in points.
 
 ---
 

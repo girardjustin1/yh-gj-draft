@@ -8,11 +8,16 @@ import pytest
 from fantasy_draft.analytics.fantasy_points import fantasy_points_expr, score_weekly_stats
 from fantasy_draft.analytics.replacement import replacement_levels, replacement_rank
 from fantasy_draft.analytics.scarcity import position_scarcity
-from fantasy_draft.analytics.tiers import _local_gap_scores, _tier_one_position, assign_tiers
+from fantasy_draft.analytics.tiers import (
+    _local_gap_scores,
+    _tier_one_position,
+    assign_tiers,
+    expected_loss_by_waiting,
+)
 from fantasy_draft.analytics.vbd import add_vbd, compute_vbd
 from fantasy_draft.config import AppConfig, LeagueConfig, ScoringRules
 from fantasy_draft.models import ComponentScore
-from fantasy_draft.scoring.compose import compose, component
+from fantasy_draft.scoring.compose import component, compose
 
 
 def _stat_row(**kwargs) -> pl.DataFrame:
@@ -249,10 +254,9 @@ class TestTiers:
         )
         out = assign_tiers(tmp_config, frame)
         for column in ("tier", "tier_rank", "tier_size", "points_to_next_player",
-                       "points_to_next_tier", "tier_cliff_score"):
+                       "points_to_next_tier"):
             assert column in out.columns
         assert out["tier_rank"].min() == 1
-        assert out["tier_cliff_score"].max() <= 100
 
     def test_tier_rank_restarts_each_tier(self, tmp_config: AppConfig):
         frame = pl.DataFrame(
@@ -267,6 +271,71 @@ class TestTiers:
         first_of_each = out.group_by("tier").agg(pl.col("tier_rank").min())
         assert set(first_of_each["tier_rank"]) == {1}
 
+class TestExpectedLossByWaiting:
+    """The honest form of "tier cliff": if I skip him, who do I actually get instead?"""
+
+    def _pool(self) -> pl.DataFrame:
+        # A deliberate cliff: five close players, then a 60-point drop.
+        points = [200.0, 196.0, 192.0, 188.0, 184.0, 124.0, 120.0, 116.0]
+        return pl.DataFrame(
+            {
+                "player_key": [f"p{i}" for i in range(len(points))],
+                "position": ["RB"] * len(points),
+                "projected_points": points,
+                "vbd": [p - 100.0 for p in points],
+            }
+        )
+
+    def test_a_small_slide_inside_a_flat_stretch_costs_little(self):
+        out = expected_loss_by_waiting(self._pool(), {"RB": 1})
+        assert out.filter(pl.col("player_key") == "p0")["expected_loss_points"][0] == 4.0
+
+    def test_a_slide_across_the_cliff_costs_a_lot(self):
+        out = expected_loss_by_waiting(self._pool(), {"RB": 5})
+        assert out.filter(pl.col("player_key") == "p0")["expected_loss_points"][0] == 76.0
+
+    def test_more_demand_means_more_loss(self):
+        quiet = expected_loss_by_waiting(self._pool(), {"RB": 1})
+        busy = expected_loss_by_waiting(self._pool(), {"RB": 4})
+        assert (busy["expected_loss_points"].sum() > quiet["expected_loss_points"].sum())
+
+    def test_loss_is_capped_at_value_over_replacement(self):
+        """Waiting cannot cost more than his edge over a freely available player."""
+        out = expected_loss_by_waiting(self._pool(), {"RB": 7})
+        row = out.filter(pl.col("player_key") == "p0")
+        assert row["expected_loss_points"][0] <= row["vbd"][0]
+
+    def test_a_player_in_a_deep_flat_tier_is_not_urgent(self):
+        """The bug this replaced: the first of fourteen similar players scored a maximum
+        cliff because the drop at the bottom of his tier was large."""
+        points = [300.0 - i for i in range(14)] + [180.0]
+        pool = pl.DataFrame(
+            {
+                "player_key": [f"q{i}" for i in range(15)],
+                "position": ["QB"] * 15,
+                "projected_points": points,
+                "vbd": [p - 150.0 for p in points],
+            }
+        )
+        out = expected_loss_by_waiting(pool, {"QB": 2})
+        first = out.filter(pl.col("player_key") == "q0")["tier_cliff_score"][0]
+        last_before_cliff = out.filter(pl.col("player_key") == "q13")["tier_cliff_score"][0]
+        assert first < 10
+        assert last_before_cliff > 90
+
+    def test_end_of_list_uses_the_last_player(self):
+        out = expected_loss_by_waiting(self._pool(), {"RB": 20})
+        assert out["expected_loss_points"].null_count() == 0
+
+    def test_empty_board(self):
+        empty = pl.DataFrame(
+            schema={"player_key": pl.Utf8, "position": pl.Utf8, "projected_points": pl.Float64}
+        )
+        out = expected_loss_by_waiting(empty, {})
+        assert "tier_cliff_score" in out.columns
+
+
+class TestTiersContinued:
     def test_two_positions_are_tiered_independently(self, tmp_config: AppConfig):
         frame = pl.DataFrame(
             {

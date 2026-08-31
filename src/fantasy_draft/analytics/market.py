@@ -5,6 +5,19 @@ Two distinct questions live here, and conflating them is a common way to draft b
 **"Is he falling?"** — his consensus draft position versus the pick actually on the
 clock. Pure market value, and only meaningful during a live draft.
 
+Two corrections make this behave. First, the discount is **capped at the horizon we can
+act over**: a player 90 picks past his ADP is not a bargain now, because we could simply
+take him later and spend this pick on someone who will be gone. Second, and more
+importantly, the discount is **weighted by the probability we would actually lose him**.
+
+That second point is the one that makes the difference between a rankings viewer and a
+decision engine: *a discount you can still capture at your next pick is not a discount*.
+Without it, market value and next-pick urgency double-count the same fact with opposite
+signs — a player available well past his ADP scores high on value and low on urgency,
+and the two very nearly cancel, leaving the engine recommending players it simultaneously
+reports an 81% chance of still being there. Scaling the discount by the probability he
+disappears resolves it: value you would have got anyway is worth nothing now.
+
 **"Is the market wrong about him?"** — his consensus rank versus *our* VBD ordering.
 Meaningful at any time, and the thing that makes this engine more than a rankings viewer.
 
@@ -62,13 +75,19 @@ def adp_table(db: Database, cfg: AppConfig) -> pl.DataFrame:
 
 
 def market_signals(
-    board: pl.DataFrame, adp: pl.DataFrame, current_pick: int | None = None
+    board: pl.DataFrame,
+    adp: pl.DataFrame,
+    current_pick: int | None = None,
+    picks_until_next: int | None = None,
+    next_pick: int | None = None,
 ) -> pl.DataFrame:
     """Attach ADP, market value, and projection-versus-market disagreement.
 
     ``current_pick`` is the overall pick on the clock. Without it, market value is
     reported against the player's own VBD ordering instead, which is the right question
-    for a static board.
+    for a static board. ``next_pick`` enables the survival weighting described above; it
+    uses only the ADP distribution, so there is no circular dependency on the full
+    roster-aware survival model.
     """
     if board.is_empty():
         return board
@@ -95,6 +114,44 @@ def market_signals(
     else:
         frame = frame.with_columns(pl.col("market_disagreement").alias("adp_delta"))
 
+    # A discount is only worth something if we could not have captured it by waiting.
+    # A player whose ADP is 90 picks away is not a bargain at this pick -- we could take
+    # him three rounds from now and spend this pick on someone who will be gone. So the
+    # discount that counts is capped at the horizon we can actually act over: the picks
+    # until our next selection, plus a round of slack. Without that cap, every deep
+    # player scores a perfect 100 on market value and floats to the top of the board.
+    horizon = float((picks_until_next or 12) + 12)
+    frame = frame.with_columns(
+        pl.min_horizontal(pl.col("adp_delta"), pl.lit(horizon)).alias("capturable_delta")
+    )
+
+    # Weight the discount by the chance we would actually lose him. A reach (negative
+    # delta) is a reach regardless of who else wants him, so only the positive side is
+    # scaled.
+    if next_pick is not None:
+        from ..draft.availability import adp_survival
+
+        gone = [
+            1.0 - adp_survival(a, sd, next_pick)
+            for a, sd in zip(
+                frame["adp"].to_list(),
+                frame["adp_sd"].to_list() if "adp_sd" in frame.columns
+                else [None] * frame.height,
+                strict=True,
+            )
+        ]
+        frame = frame.with_columns(pl.Series("adp_probability_gone", gone, dtype=pl.Float64))
+        frame = frame.with_columns(
+            pl.when(pl.col("capturable_delta") > 0)
+            .then(pl.col("capturable_delta") * pl.col("adp_probability_gone"))
+            .otherwise(pl.col("capturable_delta"))
+            .alias("capturable_delta")
+        )
+    else:
+        frame = frame.with_columns(
+            pl.lit(None, dtype=pl.Float64).alias("adp_probability_gone")
+        )
+
     # Normalize the discount against the ADP uncertainty we actually observe, so a
     # 10-pick fall for a tightly ranked player counts for more than for a volatile one.
     spread = pl.col("adp_sd").fill_null(
@@ -102,7 +159,7 @@ def market_signals(
     ).fill_null(12.0).clip(2.0, 60.0)
 
     frame = frame.with_columns(
-        (50.0 + 50.0 * (pl.col("adp_delta") / (2.0 * spread)).clip(-1, 1))
+        (50.0 + 50.0 * (pl.col("capturable_delta") / (2.0 * spread)).clip(-1, 1))
         .fill_null(50.0)
         .alias("market_value_score"),
         (
