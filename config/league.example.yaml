@@ -1,0 +1,76 @@
+# ---------------------------------------------------------------------------------
+# Fantasy Draft AI — league configuration
+#
+# Copy this file to config/league.yaml and edit it. league.yaml is gitignored so your
+# private league details never leave your machine.
+#
+#   cp config/league.example.yaml config/league.yaml
+#
+# Until league.yaml exists the engine falls back to THIS file, so everything still
+# runs — it just won't be your league. `ff doctor` will tell you.
+# ---------------------------------------------------------------------------------
+
+name: "Example Home League"
+season: 2026
+
+# sleeper | espn | yahoo | manual   (only sleeper is wired up today)
+platform: sleeper
+
+# Filled in by `ff sleeper use-league`. Leave null until then.
+league_id: null
+draft_id: null
+
+teams: 12
+
+# Fantasy weeks. Used by the schedule-strength module to weight matchups.
+regular_season_weeks: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+playoff_weeks: [15, 16, 17]
+
+draft:
+  type: snake            # snake | linear
+  rounds: 15
+  slot: null             # your 1-indexed draft position; null until you know it
+  third_round_reversal: false
+  seconds_on_clock: 90
+
+# Starting lineup + bench. These drive replacement level, VBD, scarcity and roster fit,
+# so getting them right matters more than any single weight in the model.
+roster:
+  qb: 1
+  rb: 2
+  wr: 2
+  te: 1
+  flex: 1                # RB/WR/TE
+  wrrb_flex: 0           # RB/WR only
+  rec_flex: 0            # WR/TE only
+  superflex: 0           # QB/RB/WR/TE — set to 1 for a superflex league
+  k: 1
+  dst: 1
+  bench: 6
+  ir: 1
+
+# Points per event. Defaults below describe a standard half-PPR league.
+scoring:
+  passing_yards_per_point: 25.0    # 1 point per 25 passing yards
+  passing_td: 4.0
+  passing_interception: -2.0
+  passing_2pt: 2.0
+
+  rushing_yards_per_point: 10.0
+  rushing_td: 6.0
+  rushing_2pt: 2.0
+
+  receiving_yards_per_point: 10.0
+  receiving_td: 6.0
+  receiving_2pt: 2.0
+  reception: 0.5                   # 0.0 standard, 0.5 half-PPR, 1.0 full PPR
+
+  fumble_lost: -2.0
+
+  # Milestone bonuses. 0.0 disables.
+  bonus_pass_300_yards: 0.0
+  bonus_pass_400_yards: 0.0
+  bonus_rush_100_yards: 0.0
+  bonus_rush_200_yards: 0.0
+  bonus_rec_100_yards: 0.0
+  bonus_rec_200_yards: 0.0

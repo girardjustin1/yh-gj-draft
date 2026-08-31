@@ -1,0 +1,110 @@
+# ---------------------------------------------------------------------------------
+# Scoring weights and model parameters.
+#
+# NOTHING here is settled truth. These are defensible starting points chosen to be
+# interpretable, and the architecture exists so they can be backtested and retuned.
+# See docs/scoring.md for what each component means and how it is normalized.
+#
+# Each of player_score / value_score / draft_now MUST sum to exactly 1.0; the config
+# loader refuses to start otherwise.
+# ---------------------------------------------------------------------------------
+
+# "How desirable is this player, independent of where we are in the draft?"
+player_score:
+  projection: 0.35            # consensus fantasy points in our scoring rules
+  vbd: 0.25                   # points above positional replacement
+  opportunity: 0.15           # role/usage: snap, target, carry, red-zone share
+  offense_environment: 0.10   # quality + pace + scoring rate of his offense
+  schedule: 0.075             # position-specific strength of schedule
+  risk: 0.075                 # inverted risk: injury, role, sample, disagreement
+
+# "How much value does taking him at THIS pick capture?"
+value_score:
+  market_value: 0.40          # ADP/ECR versus the current pick
+  tier_cliff: 0.25            # how far the drop is to the next tier
+  scarcity: 0.20              # positional supply relative to remaining demand
+  projection_vs_market: 0.15  # our projection disagreeing with the market
+
+# "What should I select at this exact moment?"
+draft_now:
+  player_score: 0.35
+  value_score: 0.20
+  next_pick_urgency: 0.15     # driven by probability he's gone before our next pick
+  tier_scarcity: 0.10
+  roster_fit: 0.075
+  draft_room: 0.075           # position runs and demand in this specific room
+  strategy_fit: 0.05
+
+# --- Value Based Drafting ---------------------------------------------------------
+# Replacement level is NOT a hard-coded rank. We estimate how many players at each
+# position actually come off the board before the position stops being startable.
+replacement:
+  # starter_demand : teams * (dedicated starters + share of flex) * bench_multiplier
+  # fixed_rank     : the literal ranks below
+  # blended        : blend_weight * starter_demand + (1 - blend_weight) * fixed_rank
+  method: blended
+  blend_weight: 0.7
+
+  # Bench hoarding: managers roster far more RBs than they start. A 12-team league
+  # with 2 RB + a third of a FLEX = 28 starting RB slots, but ~43 RBs get drafted,
+  # so RB replacement sits well below RB24. These multipliers encode that.
+  bench_multiplier:
+    QB: 1.35
+    RB: 1.55
+    WR: 1.50
+    TE: 1.25
+    K: 1.0
+    DST: 1.0
+
+  # Used when starter demand can't be computed, and as the blend anchor.
+  fixed_rank:
+    QB: 14
+    RB: 36
+    WR: 42
+    TE: 14
+    K: 13
+    DST: 13
+
+  # Average projected points across +/- this many ranks around the replacement index,
+  # so one noisy projection doesn't move every VBD number in the league.
+  smoothing_window: 3
+
+# --- Tiers ------------------------------------------------------------------------
+tiers:
+  method: gap                 # gap | kmeans_1d
+  gap_sigma: 1.0              # a gap this many sigma above average starts a new tier
+  min_tier_size: 1
+  max_tiers:
+    QB: 8
+    RB: 10
+    WR: 10
+    TE: 8
+    K: 4
+    DST: 4
+  depth:                      # only tier the top N per position; the rest is a tail tier
+    QB: 32
+    RB: 60
+    WR: 72
+    TE: 32
+    K: 24
+    DST: 24
+
+# --- Monte Carlo draft simulation -------------------------------------------------
+simulation:
+  iterations: 2000
+  seed: 20260831
+  adp_noise_scale: 1.0        # 1.0 = use the source's own ADP standard deviation
+  best_available_rate: 0.35   # chance a simulated manager ignores need entirely
+  two_pick_candidates: 8      # how many candidates get full two-pick EV treatment
+
+# --- Adaptive strategy ------------------------------------------------------------
+# Soft priors only. These shift during the draft based on what actually falls.
+strategy_priors:
+  balanced: 0.35
+  hero_rb: 0.40
+  robust_rb: 0.15
+  zero_rb: 0.10
+
+# Half-life in seasons for weighting historical data. 1.5 means a season two years
+# back counts about 40% as much as last season.
+season_recency_halflife: 1.5

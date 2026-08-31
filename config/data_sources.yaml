@@ -1,0 +1,84 @@
+# ---------------------------------------------------------------------------------
+# Data sources. Each adapter is independent — one failing must never take down the
+# recommendation engine, it only lowers that component's confidence.
+#
+# max_age_hours drives the staleness warnings in `ff data status` and `ff on-clock`.
+# weight is the relative trust given to a source when several are combined.
+# ---------------------------------------------------------------------------------
+
+# How many completed seasons of history to ingest for opportunity/risk/schedule work.
+history_seasons: 4
+
+sources:
+  nflverse_players:
+    enabled: true
+    max_age_hours: 168
+    notes: "Canonical player list + cross-platform IDs. Changes slowly."
+
+  nflverse_ff_playerids:
+    enabled: true
+    max_age_hours: 168
+    notes: "DynastyProcess/ffverse ID map: sleeper, espn, yahoo, fantasypros, pfr."
+
+  nflverse_schedules:
+    enabled: true
+    max_age_hours: 168
+    notes: "Includes the full 2026 schedule; source of bye weeks and matchups."
+
+  nflverse_rosters:
+    enabled: true
+    max_age_hours: 24
+    notes: "Current-season rosters; drives team assignment and depth context."
+
+  nflverse_player_stats:
+    enabled: true
+    max_age_hours: 168
+    notes: "Weekly historical box scores; basis for our own fantasy-point scoring."
+
+  nflverse_ff_opportunity:
+    enabled: true
+    max_age_hours: 168
+    notes: "Expected fantasy points model. Core input to the Opportunity Score."
+
+  nflverse_snap_counts:
+    enabled: true
+    max_age_hours: 168
+    notes: "Snap share; role stability signal."
+
+  nflverse_injuries:
+    enabled: true
+    max_age_hours: 12
+    notes: "Practice/report status. Stale injury data must lower risk confidence."
+
+  nflverse_depth_charts:
+    enabled: true
+    max_age_hours: 24
+    notes: "Depth position; role competition signal."
+
+  fantasypros_ecr:
+    enabled: true
+    max_age_hours: 24
+    weight: 1.0
+    notes: "Expert consensus rank with best/worst/sd — our ADP-uncertainty backbone."
+
+  sleeper_players:
+    enabled: true
+    max_age_hours: 24
+    notes: "Sleeper player universe; required to map live draft picks."
+
+  sleeper_draft:
+    enabled: true
+    max_age_hours: 0.05
+    notes: "Live draft state. Anything older than ~3 minutes is labelled stale."
+
+  manual_projections:
+    enabled: true
+    max_age_hours: 720
+    weight: 1.0
+    notes: "CSV/Parquet/JSON you import with `ff import projections`."
+
+  manual_adp:
+    enabled: true
+    max_age_hours: 720
+    weight: 1.0
+    notes: "CSV you import with `ff import adp`."

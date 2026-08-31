@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# Secrets & credentials
+.env
+.env.*
+!.env.example
+*cookies*
+*credentials*
+*.pem
+*token*.json
+
+# Private league data
+config/league.yaml
+config/sleeper.yaml
+data/
+!data/.gitkeep
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
