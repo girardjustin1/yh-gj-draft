@@ -192,6 +192,24 @@ select{background:var(--panel-2);color:var(--text);border:1px solid var(--line);
   color:#fff;font-weight:850;letter-spacing:1px;font-size:13px;opacity:0}
 .prow.armed .swipehint{opacity:1}
 
+/* ---------- now -> then path ---------- */
+.pathline{display:grid;grid-template-columns:1fr 30px 108px;gap:10px;align-items:center;
+  padding:12px;background:var(--panel-2);border-radius:12px;border:1px solid var(--line)}
+.steplbl{font-size:9.5px;letter-spacing:.9px;text-transform:uppercase;color:var(--dim);
+  font-weight:750;margin-bottom:4px}
+.patharrow{font-size:22px;color:var(--dimmer);text-align:center}
+.paththen{text-align:center}
+.thenpos{font-size:26px;font-weight:850;letter-spacing:-.5px;padding:5px 0;border-radius:9px;
+  color:#08121c;margin:2px 0}
+.thenpos.pos-QB{background:var(--qb)}.thenpos.pos-RB{background:var(--rb)}
+.thenpos.pos-WR{background:var(--wr)}.thenpos.pos-TE{background:var(--te)}
+.paththen .recsub{font-size:10px;margin-top:2px}
+@media(max-width:430px){
+  .pathline{grid-template-columns:1fr 24px 88px;padding:10px}
+  .thenpos{font-size:22px}
+  .recname{font-size:23px}
+}
+
 /* ---------- suggested picks ---------- */
 .sugg{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;
   padding:10px 11px;border-radius:11px;background:var(--panel-2);
@@ -315,58 +333,26 @@ select{background:var(--panel-2);color:var(--text);border:1px solid var(--line);
 <div class="wrap">
   <div id="alerts"></div>
 
-  <section class="card" id="howCard">
-    <h2>How this works</h2>
-    <div class="body">
-      <ol class="how">
-        <li><b>Set your draft slot</b> — the button in the recommendation panel.</li>
-        <li><b>Record every pick as it happens</b>, including other managers&#39;. Search for
-          the player, then tap <span class="btn-mine">MINE</span> if you took him or
-          <span class="btn-gone">GONE</span> if someone else did. That is how the app
-          knows who is left.</li>
-        <li><b>When it is your turn</b>, the top panel tells you who to take and why.</li>
-      </ol>
+  <!-- 1 ─ where you stand and what is missing -->
+  <section class="card" id="strengthCard">
+    <h2><span class="n">1</span> Team strength &amp; what you need</h2>
+    <div class="body" id="strengthBody"><div class="empty">—</div></div>
+    <div class="body" id="needsBody" style="border-top:1px solid var(--line)">
+      <div class="empty">—</div>
     </div>
   </section>
 
-  <div class="grid3">
-    <section class="card hero">
-      <h2><span class="n">1</span> On the clock</h2>
-      <div class="body" id="clockBody">
-        <div class="empty">Tap <b>ANALYSE PICK</b> below.</div>
-      </div>
-    </section>
-
-    <section class="card">
-      <h2>Positional value over replacement</h2>
-      <div class="body" id="vorBody"><div class="empty">—</div></div>
-    </section>
-  </div>
-
-  <section class="card" id="strengthCard">
-    <h2>Team strength by position</h2>
-    <div class="body" id="strengthBody"><div class="empty">—</div></div>
+  <!-- 2 ─ the decision, across both picks -->
+  <section class="card hero">
+    <h2><span class="n">2</span> Your next pick</h2>
+    <div class="body" id="clockBody">
+      <div class="empty">Tap <b>ANALYSE PICK</b> below.</div>
+    </div>
   </section>
 
-  <section class="card" id="needsCard">
-    <h2>What you still need</h2>
-    <div class="body" id="needsBody"><div class="empty">—</div></div>
-  </section>
-
-  <div class="grid2">
-    <section class="card">
-      <h2><span class="n">4</span> Who makes it back to me?</h2>
-      <div class="body" id="survivalBody"><div class="empty">—</div></div>
-    </section>
-
-    <section class="card">
-      <h2><span class="n">5</span> What if I take…</h2>
-      <div class="body" id="whatIfBody"><div class="empty">—</div></div>
-    </section>
-  </div>
-
+  <!-- 3 ─ the player pool -->
   <section class="card">
-    <h2><span class="n">2</span> Best available</h2>
+    <h2><span class="n">3</span> Players</h2>
     <div class="tabs" id="tabs"></div>
     <div class="searchbar">
       <input id="searchBox" type="search" placeholder="Search a player to record their pick…"
@@ -379,12 +365,12 @@ select{background:var(--panel-2);color:var(--text);border:1px solid var(--line);
         <option value="draft_now">Sort · Draft Now</option>
         <option value="player_score">Sort · Player Score</option>
         <option value="probability_gone">Sort · Most likely gone</option>
+        <option value="lineup_upgrade">Sort · Fills my lineup</option>
         <option value="vbd">Sort · VBD</option>
         <option value="adp">Sort · ADP</option>
         <option value="adp_value">Sort · ADP value</option>
         <option value="ceiling">Sort · Ceiling</option>
         <option value="floor">Sort · Floor</option>
-        <option value="lineup_upgrade">Sort · Fills my lineup</option>
         <option value="projection">Sort · Projection</option>
       </select>
     </div>
@@ -392,14 +378,46 @@ select{background:var(--panel-2);color:var(--text);border:1px solid var(--line);
     <div class="body muted" id="listHint"></div>
   </section>
 
+  <!-- secondary -->
+  <div class="grid2">
+    <section class="card">
+      <h2>Who makes it back to me?</h2>
+      <div class="body" id="survivalBody"><div class="empty">—</div></div>
+    </section>
+    <section class="card">
+      <h2>Both picks, priced</h2>
+      <div class="body" id="whatIfBody"><div class="empty">—</div></div>
+    </section>
+  </div>
+
   <section class="card">
-    <h2><span class="n">3</span> My roster</h2>
+    <h2>Positional value on the board</h2>
+    <div class="body" id="vorBody"><div class="empty">—</div></div>
+  </section>
+
+  <section class="card">
+    <h2>Starting lineup</h2>
     <div class="body" id="rosterBody"><div class="empty">—</div></div>
   </section>
 
   <section class="card">
     <h2>Draft environment &amp; data health</h2>
     <div class="body" id="envBody"><div class="empty">—</div></div>
+  </section>
+
+  <section class="card" id="howCard">
+    <h2>How this works</h2>
+    <div class="body">
+      <ol class="how">
+        <li><b>Set your draft slot</b> — the button in the next-pick panel.</li>
+        <li><b>Record every pick as it happens</b>, including other managers&#39;.
+          Search for him, then tap the blue <span class="btn-mine">DRAFT</span> button if
+          <i>you</i> took him, or <b>swipe the row left</b> if someone else did. That is
+          how the app knows who is left.</li>
+        <li><b>When it is your turn</b>, panel 2 tells you who to take and what to aim
+          for at the pick after.</li>
+      </ol>
+    </div>
   </section>
 </div>
 
@@ -415,7 +433,7 @@ select{background:var(--panel-2);color:var(--text);border:1px solid var(--line);
 "use strict";
 const $ = (id) => document.getElementById(id);
 const POSITIONS = ["ALL","QB","RB","WR","TE"];
-const TABS = [["available","Available"],["roster","My team"],["gone","Taken"]];
+const TABS = [["available","Available"],["roster","My team"],["gone","Drafted"]];
 let LATEST=null, POS="ALL", SORT="draft_now", TAB="available", SELECTED=new Set(), BUSY=false;
 
 const fmt=(v,d=1)=>(v==null)?"–":Number(v).toFixed(d);
@@ -616,26 +634,42 @@ function renderOffline(){
     ? `next <b>${Offline.label(a.myNext)}</b> · <b>${a.untilNext}</b> away · slot <b>${Offline.slot}</b>`
     : `slot <b>${Offline.slot}</b> · ${a.picksMade} drafted`;
 
-  /* 1 — recommendation */
+  /* 2 — the decision, expressed across both picks */
+  const tpAll=Object.values(a.twoPick).sort((x,y)=>y.combined-x.combined);
+  const best=tpAll[0];
+  const thenPos = best ? best.likely_next_position : null;
   $("clockBody").innerHTML = !top ? `<div class="empty">No players left.</div>` : `
-    <div class="recname">${esc(top.name)}</div>
-    <div class="recsub">
-      <span class="posdot ${posClass(top.position)}">${esc(top.position)}</span>
-      <span>${esc(top.team??"")}</span>${top.bye_week?`<span>· bye ${top.bye_week}</span>`:""}
-      ${top.tier?`<span>· tier ${top.tier}</span>`:""}
+    <div class="pathline">
+      <div class="pathnow">
+        <div class="steplbl">NOW · ${esc(a.pickLabel)}</div>
+        <div class="recname">${esc(top.name)}</div>
+        <div class="recsub">
+          <span class="posdot ${posClass(top.position)}">${esc(top.position)}</span>
+          <span>${esc(top.team??"")}</span>${top.bye_week?`<span>· bye ${top.bye_week}</span>`:""}
+          ${top.tier?`<span>· tier ${top.tier}</span>`:""}
+        </div>
+      </div>
+      <div class="patharrow">→</div>
+      <div class="paththen">
+        <div class="steplbl">THEN · ${a.myNext?esc(Offline.label(a.myNext)):"—"}</div>
+        <div class="thenpos ${thenPos?posClass(thenPos):""}">${esc(thenPos??"?")}</div>
+        <div class="recsub" style="justify-content:center">most likely available</div>
+      </div>
     </div>
     <div class="statrow">
       <div class="statbox"><div class="v">${fmt(top.player_score)}</div><div class="k">Player score</div></div>
-      <div class="statbox"><div class="v">${fmt(top.vbd,0)}</div><div class="k">VBD</div></div>
       <div class="statbox"><div class="v" style="color:${urgency(top.probability_gone)}">${pct(top.probability_gone)}</div><div class="k">Gone by next</div></div>
       <div class="statbox"><div class="v">+${fmt(top.lineup_upgrade,0)}</div><div class="k">Adds to lineup</div></div>
+      <div class="statbox"><div class="v">${best?fmt(best.combined):"–"}</div><div class="k">Both picks</div></div>
     </div>
     <div class="reason">Best available weighted by how likely each player is to be gone by
       <b>${a.myNext?esc(Offline.label(a.myNext)):"your next pick"}</b>, using the roster
-      needs of the ${a.needs.length} managers picking in between.</div>
-    <div class="muted" style="margin:14px 0 7px;text-transform:uppercase;letter-spacing:.7px;font-size:10.5px">Suggested picks</div>
-    ${[top, ...a.pool.slice(1,3)].map((r,i)=>`
-      <div class="sugg ${i===0?"top":""}">
+      needs of the ${a.needs.length} managers picking in between.
+      ${thenPos?`Simulations say <b>${esc(thenPos)}</b> is the position most likely to still
+        be there when you pick again.`:""}</div>
+    <div class="muted" style="margin:14px 0 7px;text-transform:uppercase;letter-spacing:.7px;font-size:10.5px">Or take one of these</div>
+    ${a.pool.slice(1,3).map(r=>`
+      <div class="sugg">
         <div><div class="suggname">${esc(r.name)}</div>
           <div class="suggmeta"><span class="posdot ${posClass(r.position)}">${esc(r.position)}</span>
             ${esc(r.team??"")} ${r.bye_week?`BYE ${r.bye_week}`:""} ·
@@ -643,11 +677,17 @@ function renderOffline(){
         <button class="draftbtn" data-draft="${esc(r.player_key)}" data-n="${esc(r.name)}">DRAFT</button>
       </div>`).join("")}
     <div class="altrow">
+      <button class="draftbtn" data-draft="${esc(top.player_key)}" data-n="${esc(top.name)}"
+        style="padding:11px 18px;font-size:12.5px">DRAFT ${esc(top.name.toUpperCase())}</button>
       <button class="altchip" onclick="offlineSetSlot()">Slot: <b>${Offline.slot}</b> — change</button>
       <span class="altchip" style="cursor:default">Scored <b>${esc(d.generated_at.slice(0,10))}</b></span>
       <button class="altchip" onclick="const k=Offline.undo();toast(k?'Undid last pick':'Nothing to undo');renderOffline();">Undo last</button>
       <button class="altchip" onclick="if(confirm('Clear all drafted players?')){Offline.reset();renderOffline();}">Reset</button>
     </div>`;
+  $("clockBody").querySelectorAll("[data-draft]").forEach(b=>b.onclick=()=>{
+    Offline.record(b.dataset.draft,true); toast(`${b.dataset.n} — added to your team`);
+    renderOffline();
+  });
 
   /* 4 — survival */
   const surv=a.pool.filter(p=>p.probability_available!=null).slice(0,8);

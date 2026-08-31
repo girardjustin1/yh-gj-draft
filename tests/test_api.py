@@ -189,11 +189,36 @@ class TestPage:
         assert response.status_code == 200
         assert "ANALYSE PICK" in response.text
 
-    def test_page_contains_all_five_areas(self, client):
+    def test_page_contains_every_area(self, client):
         text = client.get("/").text
-        for heading in ("On the clock", "Who makes it back to me?", "What if I take",
-                        "Best available", "My roster"):
+        for heading in ("Team strength &amp; what you need", "Your next pick", "Players",
+                        "Who makes it back to me?", "Both picks, priced",
+                        "Starting lineup"):
             assert heading in text
+
+    def test_widgets_are_in_the_requested_order(self, client):
+        """Top-down: where I stand, what to take, then the pool.
+
+        Asserted rather than assumed, because a later edit that reorders the body would
+        otherwise silently undo a layout the user asked for specifically.
+        """
+        text = client.get("/").text
+        order = ["Team strength &amp; what you need", "Your next pick", "Players"]
+        positions = [text.index(h) for h in order]
+        assert positions == sorted(positions), "widgets are out of order"
+
+    def test_next_pick_shows_a_two_position_path(self, client):
+        """"Take X now, then RB" — the two-pick model made visible."""
+        text = client.get("/").text
+        assert "pathline" in text
+        assert "thenpos" in text
+        assert "likely_next_position" in text
+
+    def test_player_tabs_are_available_myteam_drafted(self, client):
+        text = client.get("/").text
+        assert '["available","Available"]' in text
+        assert '["roster","My team"]' in text
+        assert '["gone","Drafted"]' in text
 
     def test_page_is_mobile_first(self, client):
         """The clock does not wait for you to find a laptop."""
@@ -329,7 +354,7 @@ class TestDraftControls:
 
     def test_page_shows_team_strength(self, client):
         page = client.get("/").text
-        assert "Team strength by position" in page
+        assert "Team strength &amp; what you need" in page
         assert "renderStrength" in page
 
     def test_mine_flag_puts_the_player_on_my_roster(self, client_with_data):

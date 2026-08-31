@@ -256,12 +256,12 @@ const Engine = (() => {
 
     /* two-pick expected value: simulator._two_pick_values */
     const order = Array.from({length:n},(_,i)=>i).sort((a,b)=>value[b]-value[a]);
+    const positions = pool.map(p=>p.position);
     const twoPick={};
     for(const key of candidates.slice(0, opts.twoPickCandidates ?? 8)){
       const idx = pool.findIndex(p=>p.player_key===key);
       if(idx<0) continue;
-      const rank = order.indexOf(idx);
-      let sum=0; const samples=[];
+      let sum=0; const samples=[]; const mix={};
       for(let s=0;s<iterations;s++){
         const base=s*n;
         let first=-1, second=-1;
@@ -269,13 +269,20 @@ const Engine = (() => {
         const pick = (first===idx) ? second : first;
         const v = pick>=0 ? value[pick] : 0;
         sum+=v; samples.push(v);
+        /* Which position we most often end up taking at the next turn — the "then RB"
+           half of the recommendation. Mirrors simulator._two_pick_values. */
+        if(pick>=0){ const q=positions[pick]; if(q) mix[q]=(mix[q]||0)+1; }
       }
       samples.sort((a,b)=>a-b);
-      const q=(p)=>samples[Math.min(samples.length-1,Math.floor(p*samples.length))];
+      const q=(pr)=>samples[Math.min(samples.length-1,Math.floor(pr*samples.length))];
       const mean=sum/iterations;
+      const total=Object.values(mix).reduce((a,b)=>a+b,0)||1;
+      const share={}; for(const [k,v] of Object.entries(mix)) share[k]=+(v/total).toFixed(3);
+      const likely=Object.keys(mix).length
+        ? Object.keys(mix).reduce((a,b)=>mix[b]>mix[a]?b:a) : null;
       twoPick[key]={player_key:key, value_now:value[idx], expected_next_value:mean,
-        combined:value[idx]+mean, low:q(0.10), high:q(0.90)};
-      void rank;
+        combined:value[idx]+mean, low:q(0.10), high:q(0.90),
+        likely_next_position:likely, position_mix:share};
     }
     return {iterations, picks:needs.length, survival, losses, twoPick};
   }

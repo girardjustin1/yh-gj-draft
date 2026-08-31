@@ -345,6 +345,38 @@ class TestMonteCarloParity:
                 python.two_pick[key].combined, abs=3.0
             ), key
 
+    def test_the_likely_next_position_agrees(self, league, tmp_config):
+        """The "then RB" half of the recommendation — omitted from the port at first, so
+        the panel rendered a literal question mark."""
+        from fantasy_draft.draft.simulator import simulate_to_next_pick
+
+        state = build_fixture_draft(picks_made=41, slot=7)
+        rows = _board_rows()
+        frame = pl.DataFrame(rows)
+        needs = opponent_needs(state, league, frame)
+        candidates = [r["player_key"] for r in rows[:4]]
+        python = simulate_to_next_pick(
+            tmp_config, state, frame, needs, candidates=candidates, iterations=6000
+        )
+        js_needs = [
+            {"overall": n.pick_overall, "slot": n.slot, "probabilities": n.probabilities}
+            for n in needs
+        ]
+        js = run_js(
+            "console.log(JSON.stringify(E.simulate(IN.board, IN.needs, "
+            "{iterations:6000, seed:20260831, candidates:IN.cands})))",
+            board=rows, needs=js_needs, cands=candidates,
+        )
+        for key in candidates:
+            assert js["twoPick"][key]["likely_next_position"] is not None, key
+            # The dominant position must match; the exact shares are sampling noise.
+            assert (
+                js["twoPick"][key]["likely_next_position"]
+                == python.two_pick[key].likely_next_position
+            ), key
+            share = js["twoPick"][key]["position_mix"]
+            assert sum(share.values()) == pytest.approx(1.0, abs=0.02)
+
 
 class TestLineupParity:
     @pytest.mark.parametrize(
