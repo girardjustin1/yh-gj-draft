@@ -196,6 +196,18 @@ class TestPage:
                         "Starting lineup"):
             assert heading in text
 
+    def test_page_is_tabbed_not_one_long_scroll(self, client):
+        """Four groups, each answering one question, instead of nine stacked cards."""
+        page = client.get("/").text
+        for pane in ("pick", "players", "team", "detail"):
+            assert f'data-pane="{pane}"' in page
+        assert "maintabs" in page and "showPane" in page
+
+    def test_bench_guidance_is_shown(self, client):
+        page = client.get("/").text
+        assert "renderBench" in page
+        assert "Bench &amp; reserves" in page
+
     def test_widgets_are_in_the_requested_order(self, client):
         """Top-down: where I stand, what to take, then the pool.
 
@@ -203,9 +215,10 @@ class TestPage:
         otherwise silently undo a layout the user asked for specifically.
         """
         text = client.get("/").text
-        order = ["Team strength &amp; what you need", "Your next pick", "Players"]
+        order = ['data-pane="pick"', 'data-pane="players"',
+                 'data-pane="team"', 'data-pane="detail"']
         positions = [text.index(h) for h in order]
-        assert positions == sorted(positions), "widgets are out of order"
+        assert positions == sorted(positions), "panes are out of order"
 
     def test_next_pick_shows_a_two_position_path(self, client):
         """"Take X now, then RB" — the two-pick model made visible."""

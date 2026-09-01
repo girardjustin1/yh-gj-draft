@@ -328,11 +328,126 @@ class PickAnalysis:
             )
 
         rows.sort(key=lambda r: -r["priority"])
+
+        bench = self._bench_plan(rows, my_keys, position_of)
         return {
             "positions": rows,
+            "bench": bench,
             "top_priority": rows[0]["position"] if rows else None,
             "has_league_comparison": bool(opponent_totals),
             "opponent_teams": len(opponent_totals),
+        }
+
+    def _bench_plan(
+        self,
+        rows: list[dict[str, Any]],
+        my_keys: list[str],
+        position_of: dict[str, str],
+    ) -> dict[str, Any]:
+        """What the bench should look like, and who to stash next.
+
+        Starters are a lineup problem; a bench is an insurance problem. The slots skew
+        toward the positions you both start most and lose most — running backs miss time
+        and lose jobs far more often than quarterbacks — so the target split is the
+        starting requirement weighted by :data:`BENCH_ATTRITION`.
+
+        Bench candidates are also chosen differently. For a starter you want the best
+        expected season; for a bench spot you are buying the tail, so candidates are
+        ranked by ceiling rather than by median. A safe 140-point backup is worth less
+        than a volatile one who might return 220 if the job opens up.
+
+        The IR slot is not part of this: you do not draft for it.
+        """
+        from .constants import BENCH_ATTRITION, BENCH_WINDOW
+
+        league = self._league
+        total = league.roster.bench
+        required = {r["position"]: r["required"] for r in rows}
+
+        # Everyone rostered beyond a starting slot is already bench depth.
+        starters_held = sum(min(r["filled"], r["required"]) for r in rows)
+        filled = max(0, len(my_keys) - starters_held)
+        remaining = max(0, total - filled)
+
+        weights = {
+            position: required.get(position, 0) * BENCH_ATTRITION.get(position, 0.5)
+            for position in ("QB", "RB", "WR", "TE")
+        }
+        weight_total = sum(weights.values()) or 1.0
+
+        # Largest-remainder allocation, so the targets sum to the bench size exactly
+        # rather than drifting by a player or two after rounding.
+        exact = {p: total * w / weight_total for p, w in weights.items()}
+        target = {p: int(v) for p, v in exact.items()}
+        for position, _ in sorted(
+            ((p, exact[p] - target[p]) for p in exact), key=lambda kv: -kv[1]
+        )[: total - sum(target.values())]:
+            target[position] += 1
+
+        held_bench: dict[str, int] = {}
+        for row in rows:
+            position = row["position"]
+            extra = max(0, row["filled"] - row["required"])
+            if extra:
+                held_bench[position] = extra
+        # Players at a position with no starting slot filled yet still count as depth
+        # once the slot is covered; anything past `required` is bench by definition.
+        for key in my_keys:
+            position = position_of.get(key)
+            if position and position not in required:
+                held_bench[position] = held_bench.get(position, 0) + 1
+
+        pool = self.best_available(limit=250)
+        slots = []
+        for position in ("RB", "WR", "TE", "QB"):
+            want = target.get(position, 0)
+            have = held_bench.get(position, 0)
+            # Skip the players you would spend on the starting slots still open at this
+            # position — they are starters, not stashes. Suggesting the best player
+            # available as a "bench pick" is just the board again under a different name.
+            starter_gap = max(0, required.get(position, 0) - sum(
+                r["filled"] for r in rows if r["position"] == position
+            ))
+            at_position = [r for r in pool if r["position"] == position]
+            # A window of players actually in range, not the whole tail. Ranking the tail
+            # purely by ceiling surfaces names with a median of 23 and a ceiling of 186 —
+            # that width is our ignorance about a camp body, not upside, and drafting it
+            # is worse than taking the obvious player.
+            window = at_position[starter_gap : starter_gap + BENCH_WINDOW]
+            candidates = [r for r in window if r["ceiling"] is not None]
+            candidates.sort(key=lambda r: -(r["ceiling"] or 0))
+            best = candidates[0] if candidates else None
+            slots.append(
+                {
+                    "position": position,
+                    "target": want,
+                    "have": have,
+                    "short": max(0, want - have),
+                    "best_upside": (
+                        {
+                            "name": best["name"],
+                            "player_key": best["player_key"],
+                            "ceiling": best["ceiling"],
+                            "median": best["median"],
+                            "outcome": best["outcome"],
+                            "probability_gone": best["probability_gone"],
+                        } if best else None
+                    ),
+                }
+            )
+        slots.sort(key=lambda s: (-s["short"], -s["target"]))
+
+        return {
+            "total": total,
+            "filled": filled,
+            "remaining": remaining,
+            "ir_slots": league.roster.ir,
+            "slots": slots,
+            "note": (
+                "Bench slots weight the positions you start most and lose most. "
+                "Candidates are ranked by ceiling, not median — a bench pick is a bet on "
+                "the tail."
+            ),
         }
 
     def who_makes_it_back(self, limit: int = 10) -> list[dict[str, Any]]:

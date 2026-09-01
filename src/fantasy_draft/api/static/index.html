@@ -47,6 +47,24 @@ button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
   border:1px solid var(--line);display:grid;place-items:center;font-size:16px;flex:none}
 .iconbtn:active{background:var(--line)}
 
+/* ---------- top-level tabs ----------
+   Four groups, each answering one question, so a 90-second clock is one screen rather
+   than a scroll: what do I do now, who is available, where do I stand, and why. */
+.maintabs{position:sticky;top:52px;z-index:25;display:grid;
+  grid-template-columns:repeat(4,1fr);gap:5px;padding:9px 0 5px;
+  background:linear-gradient(180deg,var(--bg) 72%,transparent)}
+.mtab{padding:9px 4px;border-radius:10px;background:var(--panel);
+  border:1px solid var(--line);color:var(--dim);font-size:12px;font-weight:700;
+  letter-spacing:.2px;position:relative}
+.mtab.on{background:var(--accent);border-color:var(--accent);color:#06121f}
+.mtab .badge{display:inline-block;min-width:16px;padding:0 4px;margin-left:4px;
+  border-radius:8px;background:var(--panel-2);color:var(--dim);font-size:9.5px;
+  font-family:var(--mono);vertical-align:1px}
+.mtab.on .badge{background:rgba(0,0,0,.22);color:#06121f}
+.mtab.alert{border-color:var(--bad);color:var(--bad)}
+.mtab.alert.on{background:var(--bad);border-color:var(--bad);color:#1a0708}
+@media(max-width:400px){ .mtab{font-size:11px;padding:8px 2px} .mtab .badge{display:none} }
+
 /* ---------- panels ---------- */
 .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;
   overflow:hidden;margin-top:10px}
@@ -282,6 +300,18 @@ select{background:var(--panel-2);color:var(--text);border:1px solid var(--line);
 .undraft{padding:6px 10px;border-radius:8px;border:1px solid var(--line-2);
   background:transparent;color:var(--dim);font-size:11px;font-weight:700}
 
+/* ---------- bench ---------- */
+.benchbox{margin-top:12px;padding-top:11px;border-top:1px solid var(--line)}
+.benchhead{font-size:10.5px;letter-spacing:.8px;text-transform:uppercase;font-weight:750;
+  color:var(--text);margin-bottom:9px;display:flex;gap:8px;flex-wrap:wrap;align-items:baseline}
+.benchhead .muted{text-transform:none;letter-spacing:0;font-weight:400}
+.benchrow{display:grid;grid-template-columns:38px minmax(0,1fr);gap:10px;align-items:start;
+  margin-bottom:8px}
+.benchpips{display:flex;align-items:center;gap:5px;font-size:10.5px;color:var(--dim)}
+.benchpick{font-size:12.5px;margin-top:3px;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.benchpick .muted{font-size:10.5px}
+
 /* ---------- team strength ---------- */
 .strow{display:grid;grid-template-columns:38px minmax(0,1fr) 62px;gap:10px;
   align-items:start;margin-bottom:12px}
@@ -363,95 +393,103 @@ select{background:var(--panel-2);color:var(--text);border:1px solid var(--line);
 </div>
 
 <div class="wrap">
+  <nav class="maintabs" id="mainTabs"></nav>
   <div id="alerts"></div>
 
-  <!-- 1 ─ where you stand and what is missing -->
-  <section class="card" id="strengthCard">
-    <h2><span class="n">1</span> Team strength &amp; what you need</h2>
-    <div class="body" id="strengthBody"><div class="empty">—</div></div>
-    <div class="body" id="needsBody" style="border-top:1px solid var(--line)">
-      <div class="empty">—</div>
-    </div>
-  </section>
+  <!-- ══ PICK ══ what do I do right now -->
+  <div data-pane="pick">
+    <section class="card hero">
+      <h2>Your next pick</h2>
+      <div class="body" id="clockBody">
+        <div class="empty">Tap <b>ANALYSE PICK</b> below.</div>
+      </div>
+    </section>
 
-  <!-- 2 ─ the decision, across both picks -->
-  <section class="card hero">
-    <h2><span class="n">2</span> Your next pick</h2>
-    <div class="body" id="clockBody">
-      <div class="empty">Tap <b>ANALYSE PICK</b> below.</div>
-    </div>
-  </section>
+    <section class="card">
+      <h2>Targets</h2>
+      <div class="body" id="targetsBody"><div class="empty">—</div></div>
+    </section>
 
-  <!-- targets: two candidates per position, ordered by what you need -->
-  <section class="card">
-    <h2>Targets</h2>
-    <div class="body" id="targetsBody"><div class="empty">—</div></div>
-  </section>
-
-  <!-- 3 ─ the player pool -->
-  <section class="card">
-    <h2><span class="n">3</span> Players</h2>
-    <div class="tabs" id="tabs"></div>
-    <div class="searchbar">
-      <input id="searchBox" type="search" placeholder="Search a player to record their pick…"
-             autocomplete="off" autocapitalize="off" spellcheck="false">
-      <button id="clearSearch" class="pillbtn" hidden>clear</button>
-    </div>
-    <div class="filters" id="posFilters"></div>
-    <div class="sortbar">
-      <select id="sortSel">
-        <option value="draft_now">Sort · Draft Now</option>
-        <option value="player_score">Sort · Player Score</option>
-        <option value="probability_gone">Sort · Most likely gone</option>
-        <option value="lineup_upgrade">Sort · Fills my lineup</option>
-        <option value="vbd">Sort · VBD</option>
-        <option value="adp">Sort · ADP</option>
-        <option value="adp_value">Sort · ADP value</option>
-        <option value="ceiling">Sort · Ceiling</option>
-        <option value="floor">Sort · Floor</option>
-        <option value="projection">Sort · Projection</option>
-      </select>
-    </div>
-    <ul class="plist" id="plist"><li class="empty">—</li></ul>
-    <div class="body muted" id="listHint"></div>
-  </section>
-
-  <!-- secondary -->
-  <div class="grid2">
     <section class="card">
       <h2>Who makes it back to me?</h2>
       <div class="body" id="survivalBody"><div class="empty">—</div></div>
     </section>
+  </div>
+
+  <!-- ══ PLAYERS ══ find someone, record the pick -->
+  <div data-pane="players" hidden>
+    <section class="card">
+      <h2>Players</h2>
+      <div class="tabs" id="tabs"></div>
+      <div class="searchbar">
+        <input id="searchBox" type="search" placeholder="Search a player…"
+               autocomplete="off" autocapitalize="off" spellcheck="false">
+        <button id="clearSearch" class="pillbtn" hidden>clear</button>
+      </div>
+      <div class="filters" id="posFilters"></div>
+      <div class="sortbar">
+        <select id="sortSel">
+          <option value="draft_now">Sort · Draft Now</option>
+          <option value="player_score">Sort · Player Score</option>
+          <option value="probability_gone">Sort · Most likely gone</option>
+          <option value="lineup_upgrade">Sort · Fills my lineup</option>
+          <option value="vbd">Sort · VBD</option>
+          <option value="adp">Sort · ADP</option>
+          <option value="adp_value">Sort · ADP value</option>
+          <option value="ceiling">Sort · Ceiling</option>
+          <option value="floor">Sort · Floor</option>
+          <option value="projection">Sort · Projection</option>
+        </select>
+      </div>
+      <ul class="plist" id="plist"><li class="empty">—</li></ul>
+      <div class="body muted" id="listHint"></div>
+    </section>
+  </div>
+
+  <!-- ══ MY TEAM ══ where do I stand -->
+  <div data-pane="team" hidden>
+    <section class="card">
+      <h2>Team strength &amp; what you need</h2>
+      <div class="body" id="strengthBody"><div class="empty">—</div></div>
+      <div class="body" id="needsBody" style="border-top:1px solid var(--line)">
+        <div class="empty">—</div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Starting lineup</h2>
+      <div class="body" id="rosterBody"><div class="empty">—</div></div>
+    </section>
+  </div>
+
+  <!-- ══ DETAIL ══ why, and is the data any good -->
+  <div data-pane="detail" hidden>
     <section class="card">
       <h2>Both picks, priced</h2>
       <div class="body" id="whatIfBody"><div class="empty">—</div></div>
     </section>
+
+    <section class="card">
+      <h2>Draft environment &amp; data health</h2>
+      <div class="body" id="envBody"><div class="empty">—</div></div>
+    </section>
+
+    <section class="card">
+      <h2>How this works</h2>
+      <div class="body">
+        <ol class="how">
+          <li><b>Set your draft slot</b> — the button in the next-pick panel.</li>
+          <li><b>Record every pick as it happens</b>, including other managers&#39;.
+            Find him under <b>Players</b>, then tap the blue
+            <span class="btn-mine">DRAFT</span> button if <i>you</i> took him, or
+            <b>swipe the row left</b> if someone else did. That is how the app knows who
+            is left.</li>
+          <li><b>When it is your turn</b>, the <b>Pick</b> tab tells you who to take and
+            what to aim for at the pick after.</li>
+        </ol>
+      </div>
+    </section>
   </div>
-
-  <section class="card">
-    <h2>Starting lineup</h2>
-    <div class="body" id="rosterBody"><div class="empty">—</div></div>
-  </section>
-
-  <section class="card">
-    <h2>Draft environment &amp; data health</h2>
-    <div class="body" id="envBody"><div class="empty">—</div></div>
-  </section>
-
-  <section class="card" id="howCard">
-    <h2>How this works</h2>
-    <div class="body">
-      <ol class="how">
-        <li><b>Set your draft slot</b> — the button in the next-pick panel.</li>
-        <li><b>Record every pick as it happens</b>, including other managers&#39;.
-          Search for him, then tap the blue <span class="btn-mine">DRAFT</span> button if
-          <i>you</i> took him, or <b>swipe the row left</b> if someone else did. That is
-          how the app knows who is left.</li>
-        <li><b>When it is your turn</b>, panel 2 tells you who to take and what to aim
-          for at the pick after.</li>
-      </ol>
-    </div>
-  </section>
 </div>
 
 <div class="actionbar">
@@ -750,6 +788,7 @@ function renderOffline(){
       `<div class="muted" style="margin-top:9px">This pick plus the best player expected to
        survive to your next one, over ${a.iterations.toLocaleString()} simulations.</div>`;
 
+  renderMainTabs();
   renderOfflineStrength(a);
   renderOfflineNeeds(a);
   renderTargets(a.pool, offlineStrengthCache, a.twoPick,
@@ -923,7 +962,7 @@ function attachRowActions(){
       e.stopPropagation();
       Offline.record(row.dataset.key, true);
       toast(`${row.dataset.name} — added to your team`);
-      renderOffline();
+      renderOffline(); jumpIfMyTurn();
     };
     const inner=row.querySelector(".pinner");
     let x0=null,y0=null,dx=0,locked=null;
@@ -940,7 +979,7 @@ function attachRowActions(){
     inner.addEventListener("touchend",()=>{
       inner.style.transition="";
       if(locked==="x"&&dx<-70){ Offline.record(row.dataset.key,false);
-        toast(`${row.dataset.name} — taken`); renderOffline(); }
+        toast(`${row.dataset.name} — taken`); renderOffline(); jumpIfMyTurn(); }
       inner.style.transform=""; row.classList.remove("armed"); x0=null;});
     /* Desktop, where there is no swipe: the badge marks him taken by someone else. */
     row.querySelector(".gonebadge").onclick=()=>{
@@ -1121,7 +1160,40 @@ function renderStrength(d){
        is, plus how fast the position is drying up before your next pick. A readout — the
        recommendation above stays value-driven, because reaching for a hole is how drafts
        go wrong.</div>`
-    + league;
+    + league
+    + renderBench(ts.bench);
+}
+
+/* ---------- bench ----------
+   Starters are a lineup problem; the bench is an insurance problem, and it is bought
+   differently — by ceiling rather than by median. */
+function renderBench(bench){
+  if(!bench || !bench.total) return "";
+  const wanted = bench.slots.filter(s=>s.short>0);
+  const pips = (have, target)=> Array.from({length:Math.max(target,have)},(_,i)=>
+    `<i class="pip ${i<have?"on":""}"></i>`).join("");
+  return `<div class="benchbox">
+    <div class="benchhead">Bench &amp; reserves
+      <span class="muted">${bench.filled} of ${bench.total} filled${
+        bench.ir_slots?` · ${bench.ir_slots} IR (not drafted)`:""}</span></div>
+    ${bench.slots.filter(s=>s.target>0||s.have>0).map(s=>`
+      <div class="benchrow">
+        <div class="vorlabel ${posClass(s.position)}">${s.position}</div>
+        <div><div class="benchpips">${pips(s.have,s.target)}
+          <span class="muted">${s.have} of ${s.target}</span></div>
+          ${s.best_upside?`<div class="benchpick">${esc(s.best_upside.name)}
+            <span class="muted">ceiling ${fmt(s.best_upside.ceiling,0)} ·
+              ${esc(s.best_upside.outcome)}</span></div>`:""}
+        </div>
+      </div>`).join("")}
+    <div class="muted" style="margin-top:8px">${
+      wanted.length
+        ? `Bench slots weight the positions you start most and lose most, so
+           ${wanted.map(s=>`${s.short} ${s.position}`).join(", ")} still to stash.`
+        : "Bench targets met — take the best player left."}
+      Candidates are ranked by <b>ceiling</b>, not median: a bench pick is a bet on the
+      tail, and a safe backup is worth less than a volatile one who might take over a job.</div>
+  </div>`;
 }
 
 /* ---------- what you still need ---------- */
@@ -1334,9 +1406,67 @@ function renderEnv(d){
     ${d.simulation?`<div class="muted" style="margin-top:9px">${d.simulation.iterations.toLocaleString()} simulations · seed ${d.simulation.seed}</div>`:""}`;
 }
 
+/* Recording a pick can put you on the clock; when it does, show the Pick tab rather
+   than leaving you on a list you are done with. */
+function jumpIfMyTurn(){
+  if (MODE!=="offline" || PANE==="pick") return;
+  const a = Offline.analyse();
+  if (a.myCurrent === a.currentPick) { showPane("pick"); toast("You are on the clock"); }
+}
+
+/* ---------- top-level tabs ---------- */
+const PANES = [
+  ["pick",    "Pick"],
+  ["players", "Players"],
+  ["team",    "My team"],
+  ["detail",  "Detail"],
+];
+let PANE = "pick";
+const PANE_KEY = "ffdraft.pane";
+try { PANE = localStorage.getItem(PANE_KEY) || "pick"; } catch {}
+
+function renderMainTabs(){
+  const counts = paneBadges();
+  $("mainTabs").innerHTML = PANES.map(([key,label])=>{
+    const badge = counts[key];
+    const alert = key==="pick" && counts.myTurn;
+    return `<button class="mtab ${key===PANE?"on":""} ${alert?"alert":""}" data-pane-btn="${key}">
+      ${label}${badge?`<span class="badge">${badge}</span>`:""}</button>`;
+  }).join("");
+  $("mainTabs").querySelectorAll("[data-pane-btn]").forEach(b=>
+    b.onclick=()=>showPane(b.dataset.paneBtn));
+}
+
+/* Small counts on the tabs so you can see what is behind them without switching. */
+function paneBadges(){
+  const out = {};
+  if (MODE==="offline" && typeof Offline!=="undefined" && Offline.data()){
+    const a = Offline.analyse();
+    out.players = a.pool.length;
+    out.team = Offline.myKeys().length || null;
+    out.myTurn = a.myCurrent === a.currentPick;
+  } else if (LATEST){
+    out.players = (LATEST.best_available||[]).length;
+    out.team = (LATEST.my_roster?.size) || null;
+    out.myTurn = !!LATEST.on_the_clock?.is_my_pick;
+  }
+  return out;
+}
+
+function showPane(key){
+  PANE = key;
+  try { localStorage.setItem(PANE_KEY, key); } catch {}
+  document.querySelectorAll("[data-pane]").forEach(el=>{
+    el.hidden = el.dataset.pane !== key;
+  });
+  renderMainTabs();
+  window.scrollTo({top:0,behavior:"instant"});
+}
+
 /* ---------- main ---------- */
 function renderAll(d){
   renderClock(d); renderStrength(d); renderNeeds(d);
+  renderMainTabs();
   renderTargets(d.best_available, d.team_strength,
     Object.fromEntries((d.what_if||[]).map(w=>[w.player_key,w])),
     d.on_the_clock.next_pick_label);
@@ -1400,7 +1530,7 @@ $("clearSearch").onclick=()=>{ QUERY=""; $("searchBox").value=""; $("clearSearch
    Try the local engine first. If there is no /api (static hosting), fall back to the
    baked board and say so plainly rather than failing on every button press. */
 async function boot(){
-  renderTabs();
+  renderTabs(); renderMainTabs(); showPane(PANE);
   try{
     await fetch("/api/health",{cache:"no-store"}).then(r=>{ if(!r.ok) throw 0; });
     MODE="live";

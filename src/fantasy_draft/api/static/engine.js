@@ -317,6 +317,59 @@ const Engine = (() => {
     return Math.max(1, Math.round(n));
   }
 
+  /* Relative pull each position exerts on bench slots, per starting slot.
+     Mirrors constants.BENCH_ATTRITION: a bench is insurance, and you need it most where
+     you both start most and lose most. */
+  const BENCH_ATTRITION = {RB:1.60, WR:1.15, TE:0.70, QB:0.45};
+  const BENCH_WINDOW = 24;   // constants.BENCH_WINDOW
+
+  function benchPlan(L, rows, myKeys, posOf, board){
+    const total = L.bench || 0;
+    const required = {}; for(const r of rows) required[r.position]=r.required;
+    const startersHeld = rows.reduce((s,r)=>s+Math.min(r.filled,r.required),0);
+    const filled = Math.max(0, myKeys.length - startersHeld);
+
+    const weights={}; let wTotal=0;
+    for(const p of OFFENSE){
+      weights[p] = (required[p]||0) * (BENCH_ATTRITION[p] ?? 0.5);
+      wTotal += weights[p];
+    }
+    wTotal = wTotal || 1;
+    // Largest remainder, so the targets sum to the bench size exactly.
+    const exact={}, target={};
+    for(const p of OFFENSE){ exact[p]=total*weights[p]/wTotal; target[p]=Math.floor(exact[p]); }
+    let short = total - OFFENSE.reduce((s,p)=>s+target[p],0);
+    for(const p of OFFENSE.slice().sort((a,b)=>(exact[b]-target[b])-(exact[a]-target[a]))){
+      if(short-- <= 0) break; target[p]++;
+    }
+
+    const heldBench={};
+    for(const r of rows){
+      const extra = Math.max(0, r.filled - r.required);
+      if(extra) heldBench[r.position]=extra;
+    }
+
+    const slots = OFFENSE.map(position=>{
+      const want=target[position]||0, have=heldBench[position]||0;
+      // Skip the players you would spend on starting slots still open here — they are
+      // starters, not stashes. Otherwise "best bench pick" is just the board again.
+      const gap = Math.max(0, (required[position]||0) -
+        rows.filter(r=>r.position===position).reduce((s,r)=>s+r.filled,0));
+      const atPos = board.filter(p=>p.position===position);
+      // A bounded window of players actually in range. Ranking the whole tail by ceiling
+      // surfaces camp bodies whose width is our ignorance, not their upside.
+      const cands = atPos.slice(gap, gap+BENCH_WINDOW).filter(p=>p.ceiling!=null)
+        .sort((a,b)=>(b.ceiling||0)-(a.ceiling||0));
+      const best = cands[0] || null;
+      return {position, target:want, have, short:Math.max(0,want-have),
+        best_upside: best ? {name:best.name, player_key:best.player_key,
+          ceiling:best.ceiling, median:best.median, outcome:best.outcome,
+          probability_gone:best.probability_gone} : null};
+    }).sort((a,b)=>(b.short-a.short)||(b.target-a.target));
+
+    return {total, filled, remaining:Math.max(0,total-filled), ir_slots:L.ir||0, slots};
+  }
+
   function teamStrength(L, picks, mySlot, board, losses, _unused){
     const vbd={}, pos={};
     for(const p of board){ vbd[p.player_key]=p.vbd??0; pos[p.player_key]=p.position; }
@@ -368,7 +421,10 @@ const Engine = (() => {
         expected_gone_before_next_pick:+(losses[position]||0).toFixed(1), league});
     }
     rows.sort((a,b)=>b.priority-a.priority);
-    return {positions:rows, top_priority:rows.length?rows[0].position:null,
+    const availableBoard = board.filter(p=>!picks.some(x=>x.k===p.player_key));
+    return {positions:rows,
+      bench: benchPlan(L, rows, myKeys, pos, availableBoard),
+      top_priority:rows.length?rows[0].position:null,
       has_league_comparison:Object.keys(opponents).length>0,
       opponent_teams:Object.keys(opponents).length};
   }

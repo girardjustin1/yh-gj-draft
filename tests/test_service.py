@@ -553,3 +553,58 @@ class TestTeamStrength:
         payload = analyze_current_pick(tmp_config, db, refresh=False).to_dict()
         assert "team_strength" in payload
         json.dumps(payload)
+
+
+class TestBenchPlan:
+    """Starters are a lineup problem; the bench is an insurance problem."""
+
+    def _strength(self, tmp_config, db):
+        from fantasy_draft.draft.store import save_state
+
+        save_state(db, build_fixture_draft(picks_made=41, slot=7))
+        return analyze_current_pick(tmp_config, db, refresh=False).team_strength()
+
+    def test_bench_block_is_present(self, tmp_config, db):
+        bench = self._strength(tmp_config, db)["bench"]
+        assert bench["total"] == tmp_config.league.roster.bench
+        assert bench["ir_slots"] == tmp_config.league.roster.ir
+        assert bench["slots"]
+
+    def test_targets_sum_to_the_bench_size(self, tmp_config, db):
+        """Largest-remainder allocation, so rounding cannot lose or invent a slot."""
+        bench = self._strength(tmp_config, db)["bench"]
+        assert sum(s["target"] for s in bench["slots"]) == bench["total"]
+
+    def test_running_backs_get_the_most_bench_slots(self, tmp_config, db):
+        """You need insurance most where you both start most and lose most."""
+        bench = self._strength(tmp_config, db)["bench"]
+        targets = {s["position"]: s["target"] for s in bench["slots"]}
+        assert targets["RB"] >= targets["WR"] >= targets["TE"] >= targets["QB"]
+
+    def test_one_quarterback_league_stashes_none(self, tmp_config, db):
+        bench = self._strength(tmp_config, db)["bench"]
+        assert {s["position"]: s["target"] for s in bench["slots"]}["QB"] == 0
+
+    def test_bench_candidates_are_not_the_top_of_the_board(self, tmp_config, db):
+        """Suggesting the best player available as a "bench pick" is just the board again."""
+        from fantasy_draft.draft.store import save_state
+
+        save_state(db, build_fixture_draft(picks_made=41, slot=7))
+        analysis = analyze_current_pick(tmp_config, db, refresh=False)
+        top = {r["player_key"] for r in analysis.best_available(limit=3)}
+        bench = analysis.team_strength()["bench"]
+        suggested = {
+            s["best_upside"]["player_key"] for s in bench["slots"] if s["best_upside"]
+        }
+        assert not (top & suggested)
+
+    def test_candidates_are_plausible_not_camp_bodies(self, tmp_config, db):
+        """A median of 23 with a ceiling of 186 is our ignorance, not upside."""
+        bench = self._strength(tmp_config, db)["bench"]
+        for slot in bench["slots"]:
+            best = slot["best_upside"]
+            if best and best["median"]:
+                assert best["ceiling"] <= best["median"] * 3, best["name"]
+
+    def test_serializes(self, tmp_config, db):
+        json.dumps(self._strength(tmp_config, db)["bench"])

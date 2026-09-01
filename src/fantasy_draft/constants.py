@@ -89,3 +89,31 @@ HISTORY_SEASONS: Final[int] = 4
 
 #: Regular-season week count from 2021 onward.
 REGULAR_SEASON_WEEKS: Final[int] = 18
+
+
+# --- Bench construction ------------------------------------------------------------
+
+#: Relative pull each position exerts on bench slots, per starting slot it occupies.
+#:
+#: A bench spot is insurance plus upside, and the insurance half is driven by how often
+#: you actually need a replacement: running backs miss time and lose jobs far more than
+#: quarterbacks, so a bench skews toward the positions you start most *and* lose most.
+#: One backup quarterback is enough in a single-QB league and none is defensible; two is
+#: waste.
+#:
+#: These are priors, not measurements. Once historical injury and role-change data is
+#: joined per position they should be estimated rather than assumed.
+BENCH_ATTRITION: Final[dict[str, float]] = {
+    "RB": 1.60,
+    "WR": 1.15,
+    "TE": 0.70,
+    "QB": 0.45,
+}
+
+#: How many players past your remaining starters count as realistic bench candidates.
+#:
+#: Ranking the whole tail by ceiling surfaces camp bodies with a median of 23 and a
+#: ceiling of 186. That width is uncertainty about an unknown player, not upside, and the
+#: outcome model says so through its confidence — but a raw ceiling sort ignores that. A
+#: bounded window keeps the suggestion to players you would plausibly spend a pick on.
+BENCH_WINDOW: Final[int] = 24

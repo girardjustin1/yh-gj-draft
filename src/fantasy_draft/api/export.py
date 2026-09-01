@@ -104,6 +104,7 @@ def export_board(db: Database, cfg: AppConfig, limit: int = 400) -> dict[str, An
             },
             "starters": league.roster.starters,
             "bench": league.roster.bench,
+            "ir": league.roster.ir,
             # Needed by engine.js to reproduce unfilled_starters() exactly.
             "dedicated": league.roster.dedicated,
             "flex_counts": league.roster.flex_counts,
