@@ -210,6 +210,35 @@ select{background:var(--panel-2);color:var(--text);border:1px solid var(--line);
   .recname{font-size:23px}
 }
 
+/* ---------- targets: two per position, ordered by need ---------- */
+.tgtrow{display:grid;grid-template-columns:36px minmax(0,1fr) minmax(0,1fr) auto;gap:8px;
+  align-items:stretch;margin-bottom:7px}
+.tgtpos{font-size:11px;font-weight:850;text-align:center;border-radius:8px;color:#08121c;
+  display:grid;place-items:center}
+.tgtcell{background:var(--panel-2);border:1px solid var(--line);border-radius:9px;
+  padding:7px 9px;min-width:0;text-align:left}
+.tgtcell:active{border-color:var(--accent)}
+.tgtcell.blank{opacity:.35}
+.tgtname{font-size:13px;font-weight:650;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.tgtmeta{font-size:10px;color:var(--dim);margin-top:2px;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.tgtcmp{padding:0 11px;border-radius:9px;border:1px solid var(--line-2);
+  background:transparent;color:var(--dim);font-size:10.5px;font-weight:750;white-space:nowrap}
+.tgtcmp:active{background:var(--panel-2)}
+.tgtcmp:disabled{opacity:.35}
+.cmpbox{margin:0 0 9px;padding:11px;border-radius:11px;background:var(--panel-2);
+  border:1px solid var(--accent)}
+.cmphead{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:6px}
+.cmpcol{min-width:0}
+.cmpname{font-size:14.5px;font-weight:750;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.cmprow{display:grid;grid-template-columns:1fr 1fr;gap:10px;font-family:var(--mono);
+  font-size:12.5px;padding:3px 0}
+.cmplbl{font-size:9.5px;letter-spacing:.6px;text-transform:uppercase;color:var(--dim);
+  font-family:var(--sans);margin-top:7px;border-top:1px solid var(--line);padding-top:6px}
+.cmpwin{color:var(--good);font-weight:750}
+
 /* ---------- suggested picks ---------- */
 .sugg{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;
   padding:10px 11px;border-radius:11px;background:var(--panel-2);
@@ -351,6 +380,12 @@ select{background:var(--panel-2);color:var(--text);border:1px solid var(--line);
     <div class="body" id="clockBody">
       <div class="empty">Tap <b>ANALYSE PICK</b> below.</div>
     </div>
+  </section>
+
+  <!-- targets: two candidates per position, ordered by what you need -->
+  <section class="card">
+    <h2>Targets</h2>
+    <div class="body" id="targetsBody"><div class="empty">—</div></div>
   </section>
 
   <!-- 3 ─ the player pool -->
@@ -717,6 +752,8 @@ function renderOffline(){
 
   renderOfflineStrength(a);
   renderOfflineNeeds(a);
+  renderTargets(a.pool, offlineStrengthCache, a.twoPick,
+    a.myNext?Offline.label(a.myNext):null);
 
   /* 2 — board */
   renderOfflineList(a);
@@ -753,11 +790,13 @@ function renderOffline(){
 }
 
 /* ---------- team strength, offline ---------- */
+let offlineStrengthCache=null;
 function renderOfflineStrength(a){
   const d=Offline.data();
   const unfilled=[];
   const ts=Engine.teamStrength(d.league, Offline.picks(), Offline.slot,
     d.players, a.losses||{}, unfilled);
+  offlineStrengthCache=ts;
   renderStrength({team_strength:ts});
 }
 
@@ -965,7 +1004,82 @@ function renderClock(d){
   });
 }
 
-/* ---------- positional value bars ---------- */
+/* ---------- targets: the top two at each position, most-needed first ----------
+   A shortlist rather than a ranking. You usually know which position you are choosing
+   between; this puts the two real candidates for each side by side, ordered so the
+   position you are shortest of comes first. */
+let CMP=null;   // position whose comparison is currently expanded
+
+function renderTargets(pool, strength, twoPick, nextLabel){
+  const order = (strength && strength.positions)
+    ? strength.positions.map(p=>p.position) : ["RB","WR","QB","TE"];
+  const rows = order.map(position=>{
+    const top = pool.filter(p=>p.position===position).slice(0,2);
+    const cell = (r)=> r
+      ? `<button class="tgtcell" data-pick="${esc(r.player_key)}" data-n="${esc(r.name)}">
+           <div class="tgtname">${esc(r.name)}</div>
+           <div class="tgtmeta">${esc(r.team??"")} · ${fmt(r.draft_now ?? r.player_score)} ·
+             <span style="color:${urgency(r.probability_gone)}">${pct(r.probability_gone)} gone</span></div>
+         </button>`
+      : `<div class="tgtcell blank"><div class="tgtname">—</div></div>`;
+    const row = `<div class="tgtrow">
+      <div class="tgtpos ${posClass(position)}">${position}</div>
+      ${cell(top[0])}${cell(top[1])}
+      <button class="tgtcmp" data-cmp="${position}"${top.length<2?" disabled":""}>Compare</button>
+    </div>`;
+    const panel = (CMP===position && top.length>1)
+      ? comparePanel(top[0], top[1], twoPick||{}, nextLabel) : "";
+    return row + panel;
+  }).join("");
+
+  $("targetsBody").innerHTML = rows +
+    `<div class="muted" style="margin-top:9px">Two candidates per position, the position
+     you are shortest of first. Tap a name to draft him; Compare prices both across this
+     pick and your next.</div>`;
+
+  $("targetsBody").querySelectorAll("[data-cmp]").forEach(b=>b.onclick=()=>{
+    CMP = (CMP===b.dataset.cmp) ? null : b.dataset.cmp;
+    MODE==="live" ? onClockRerender() : renderOffline();
+  });
+  $("targetsBody").querySelectorAll("[data-pick]").forEach(b=>b.onclick=()=>{
+    if(MODE!=="offline") return;
+    Offline.record(b.dataset.pick,true);
+    toast(`${b.dataset.n} — added to your team`); renderOffline();
+  });
+}
+
+/* Re-render the live view from the payload already in hand, without re-analysing. */
+function onClockRerender(){ if(LATEST) renderAll(LATEST); }
+
+function cmpLine(label, a, b, higherWins=true){
+  const na=parseFloat(a), nb=parseFloat(b);
+  const aWin = Number.isFinite(na)&&Number.isFinite(nb) && (higherWins ? na>nb : na<nb);
+  const bWin = Number.isFinite(na)&&Number.isFinite(nb) && (higherWins ? nb>na : nb<na);
+  return `<div class="cmplbl">${esc(label)}</div><div class="cmprow">
+    <div class="${aWin?"cmpwin":""}">${a}</div><div class="${bWin?"cmpwin":""}">${b}</div></div>`;
+}
+
+function comparePanel(a, b, twoPick, nextLabel){
+  const ta=twoPick[a.player_key], tb=twoPick[b.player_key];
+  return `<div class="cmpbox">
+    <div class="cmphead">
+      <div class="cmpcol"><div class="cmpname">${esc(a.name)}</div>
+        <div class="tgtmeta">${esc(a.position)} · ${esc(a.team??"")}</div></div>
+      <div class="cmpcol"><div class="cmpname">${esc(b.name)}</div>
+        <div class="tgtmeta">${esc(b.position)} · ${esc(b.team??"")}</div></div>
+    </div>
+    ${cmpLine("Player score", fmt(a.player_score), fmt(b.player_score))}
+    ${cmpLine("Gone before "+(nextLabel??"next"), pct(a.probability_gone), pct(b.probability_gone), false)}
+    ${cmpLine("Adds to lineup", fmt(a.lineup_upgrade,0), fmt(b.lineup_upgrade,0))}
+    ${(ta&&tb) ? cmpLine("Both picks", fmt(ta.combined), fmt(tb.combined)) : ""}
+    ${(ta&&tb) ? `<div class="muted" style="margin-top:8px">Across this pick and
+       ${esc(nextLabel??"your next")}: <b>${esc(ta.combined>=tb.combined?a.name:b.name)}</b>
+       by ${fmt(Math.abs(ta.combined-tb.combined))}.</div>`
+      : `<div class="muted" style="margin-top:8px">Run the simulation to price both picks.</div>`}
+  </div>`;
+}
+
+/* ---------- team strength ---------- */
 function renderStrength(d){
   const ts=d.team_strength;
   if(!ts||!ts.positions.length){ $("strengthBody").innerHTML=`<div class="empty">—</div>`; return; }
@@ -1221,6 +1335,16 @@ function renderEnv(d){
 }
 
 /* ---------- main ---------- */
+function renderAll(d){
+  renderClock(d); renderStrength(d); renderNeeds(d);
+  renderTargets(d.best_available, d.team_strength,
+    Object.fromEntries((d.what_if||[]).map(w=>[w.player_key,w])),
+    d.on_the_clock.next_pick_label);
+  renderSurvival(d); renderWhatIf(d);
+  renderList(); renderRoster(d); renderEnv(d);
+}
+
+
 async function onClock(showBusy=true){
   const btn=$("clockBtn");
   if(showBusy){ btn.disabled=true; btn.textContent="ANALYSING…"; }
@@ -1228,9 +1352,7 @@ async function onClock(showBusy=true){
   try{
     const d=await api("/api/on-clock",{refresh:true,simulate:true,limit:140});
     LATEST=d;
-    renderClock(d); renderStrength(d); renderNeeds(d);
-    renderSurvival(d); renderWhatIf(d);
-    renderList(); renderRoster(d); renderEnv(d);
+    renderAll(d);
     if(d.sync_error) alert_(`Live sync did not run — using the stored board. <span class="muted">${esc(d.sync_error)}</span>`);
   }catch(e){
     alert_("<b>Could not analyse.</b><br>"+esc(e.message),"note err");

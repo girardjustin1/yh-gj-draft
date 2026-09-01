@@ -214,6 +214,20 @@ class TestPage:
         assert "thenpos" in text
         assert "likely_next_position" in text
 
+    def test_targets_card_shows_two_per_position(self, client):
+        """A shortlist per position, not one ranked list — you usually already know
+        which position you are choosing between."""
+        page = client.get("/").text
+        assert "Targets" in page
+        assert "renderTargets" in page
+        assert "tgtrow" in page and "tgtcell" in page
+
+    def test_targets_offer_a_comparison(self, client):
+        page = client.get("/").text
+        assert "data-cmp=" in page
+        assert "comparePanel" in page
+        assert "Both picks" in page
+
     def test_player_tabs_are_available_myteam_drafted(self, client):
         text = client.get("/").text
         assert '["available","Available"]' in text
